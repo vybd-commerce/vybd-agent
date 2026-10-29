@@ -1,36 +1,61 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Vybd Agent v1
 
-## Getting Started
+Self-serve Vybd: founders shape a brand idea into a living Brand Brief through conversation, then buy real work on it (market snapshot, find suppliers) from Vybd agents backed by human operators. The same service layer powers the web chat and a remote MCP server, so a brief started in Claude or ChatGPT shows up live in the web app.
 
-First, run the development server:
+## Run it
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+pnpm install
+cp .env.example .env.local      # then fill in AUTH_SECRET (openssl rand -base64 32) and ANTHROPIC_API_KEY
+createdb vybd_agent             # or: docker compose up -d, and point DATABASE_URL at port 5433
+pnpm db:migrate
+pnpm dev                        # web app on :3000
+pnpm worker                     # runs agent jobs (market snapshot); separate process
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Sign in with any email: the magic link is printed in the `pnpm dev` log. Google sign-in turns on when `AUTH_GOOGLE_ID`/`AUTH_GOOGLE_SECRET` are set.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Operators: add emails to `OPERATOR_EMAILS` (applied at sign-in) or run `pnpm make-operator you@example.com`. Operators get an Ops console link in the sidebar (`/ops`).
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Payments: with `STRIPE_SECRET_KEY` + `STRIPE_WEBHOOK_SECRET` set, paid jobs go through Stripe Checkout (`stripe listen --forward-to localhost:3000/api/stripe/webhook`). Without them, in development only, paid jobs open a local test checkout at `/dev/checkout/<jobId>` that charges nothing.
 
-## Learn More
+Checks: `pnpm typecheck`, `pnpm lint`, `pnpm test` (uses a `vybd_agent_test` database, reset on every run; override with `TEST_DATABASE_URL`).
 
-To learn more about Next.js, take a look at the following resources:
+## How it fits together
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```
+ Web chat (/brands/[id])      MCP clients (Claude, ChatGPT)       Ops console (/ops)      Worker
+        │  POST /api/chat             │  /api/mcp + OAuth                 │ server actions        │
+        ▼                             ▼                                   ▼                       ▼
+  orchestrator (Claude) ──►  src/lib/tools.ts  (one tool table)  ◄──────────────────────── job registry
+                                      │
+                                      ▼
+                    src/lib/services/*   ← the only code that touches the database
+                                      │                 │
+                                  Postgres  ──NOTIFY──► /api/brands/[id]/events (SSE) → live panel
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- `src/lib/brief.ts`: the frozen v1 brief schema (one-liner, customer, problem, positioning, price, channels, name directions, open questions). Usable = one-liner + customer + positioning.
+- `src/lib/services/`: brands, versioned briefs (every write is a new `brief_versions` row with its source: chat, job, user_edit, mcp), conversations, jobs (state machine + events), share page and feedback. Every change NOTIFYs the brand's channel so all open surfaces update without reload.
+- `src/lib/tools.ts`: `list_brands`, `create_brand`, `get_brand_brief`, `update_brand_brief`, `quote_job`, `approve_job`, `get_job`, `list_jobs`, `create_share_page`, `get_feedback`. Used verbatim by the web orchestrator and the MCP server.
+- `src/lib/agent/`: orchestrator system prompt and interview script (`prompts.ts`), streaming tool loop (`orchestrator.ts`). The web agent also gets UI-only tools for quick-reply chips and next-step cards.
+- `src/lib/jobs/`: job types. Each declares spec and result schemas, a quote, progress steps, an operator delivery form, an optional agent `run()`, and the chat summary posted on delivery. Add a type here and it works in chat, MCP, the worker and the ops console.
+- `src/lib/mcp/` + `src/lib/oauth.ts`: Streamable HTTP MCP server with OAuth 2.1 (dynamic client registration, PKCE S256, refresh rotation). Signing in during OAuth creates the Vybd account if needed.
 
-## Deploy on Vercel
+Job lifecycle: `draft → quoted → approved → in_progress → delivered → accepted` (plus `cancelled`, `failed`). Free jobs start on approval; paid jobs return a checkout link and start only when payment is confirmed. If the agent fails, the job lands in the ops queue and an operator can deliver it by hand.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Decisions taken for the spec's open questions
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+These live in one place each and are easy to change:
+
+- Market snapshot is free; Find suppliers is $149, 5 days (`src/lib/jobs/prices.ts`).
+- The share page shows one-liner, problem, positioning and price by default; founders can toggle any field except open questions, which never go public (`brands.share_hidden_fields`, `src/lib/services/feedback.ts`).
+- MCP users don't need a web account first: OAuth sign-in creates one.
+- Model: `claude-opus-5-5` (override with `VYBD_MODEL`), with server-side refusal fallback enabled.
+- In the web app, approving a paid job also goes through Stripe Checkout. Charging a saved card is deferred.
+
+## Not in v1
+
+See BACKLOG.md for planned follow-ups (first: "Continue with ChatGPT", so founders can run web chat on their ChatGPT plan).
+
+Shopify store generation, Kickstarter, design jobs, team members, outside operators, mobile apps, emailing magic links (console only for now), email/Slack paging for ops (the console updates live and the server logs `[ops]` lines).
