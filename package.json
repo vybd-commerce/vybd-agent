@@ -4,21 +4,25 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "demo": "VYBD_DEMO=1 BUILDER_POLL_MS=1500 next dev",
     "build": "next build",
-    "start": "next start",
+    "start": "sh scripts/start.sh",
     "lint": "eslint",
     "typecheck": "next typegen && tsc --noEmit",
     "test": "vitest run",
     "worker": "tsx --env-file=.env.local src/worker/index.ts",
+    "start:worker": "tsx src/worker/index.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:studio": "drizzle-kit studio",
-    "make-operator": "tsx --env-file=.env.local scripts/make-operator.ts"
+    "make-operator": "tsx --env-file=.env.local scripts/make-operator.ts",
+    "backfill-builder": "tsx --env-file=.env.local scripts/backfill-builder.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.3.0",
     "@auth/drizzle-adapter": "^1.11.3",
     "@modelcontextprotocol/sdk": "^1.32.2",
+    "@sentry/node": "^11.11.0",
     "drizzle-orm": "^0.45.4",
     "nanoid": "^6.0.2",
     "next": "16.4.3",
