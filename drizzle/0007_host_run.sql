@@ -1,0 +1,1 @@
+ALTER TABLE "jobs" ADD COLUMN "host_run" boolean DEFAULT false NOT NULL;
