@@ -1,0 +1,23 @@
+{
+  "name": "@vybd/cli",
+  "version": "0.1.0",
+  "description": "Vybd from your terminal: brands, briefs and jobs, plus one-line setup for Claude Code and Codex.",
+  "type": "module",
+  "bin": { "vybd": "dist/index.js" },
+  "files": ["dist"],
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --target node20 --clean",
+    "dev": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "tsup": "8.5.0",
+    "tsx": "^4.23.15",
+    "typescript": "^5"
+  }
+}
