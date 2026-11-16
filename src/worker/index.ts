@@ -1,61 +1,97 @@
 /**
  * Job worker: runs the agent part of in-progress jobs. Run alongside the web app with `pnpm worker`.
  * Claims one job at a time with FOR UPDATE SKIP LOCKED, so several workers can run safely.
+ *
+ * Idle polling is slow in production (WORKER_POLL_MS) so Neon can scale to zero; the web app
+ * POSTs /wake (WORKER_URL + WORKER_TOKEN) when a job starts, which ends the wait at once.
  */
-import { describeAnthropicError } from "@/lib/anthropic";
-import { latestBrief } from "@/lib/services/brief";
-import { addAgentProgress, claimNextAgentJob, deliverJob, failJob, type Job } from "@/lib/services/jobs";
-import { jobType } from "@/lib/jobs/registry";
+import { createServer } from "node:http";
+import { timingSafeEqual } from "node:crypto";
+import { runJob } from "@/lib/jobs/runner";
+import { claimNextAgentJob } from "@/lib/services/jobs";
 import { sql } from "@/db";
+import { cleanupExpired } from "@/lib/oauth";
+import { flushMonitoring, initMonitoring, reportError } from "@/lib/monitoring";
 
-const POLL_MS = 3000;
-let stopping = false;
+initMonitoring("worker");
 
-async function runJob(job: Job) {
-  const def = jobType(job.type);
-  if (!def.run) return; // operator-only job type; nothing for the agent to do
-  console.log(`[worker] running ${job.type} ${job.id}`);
-  const brief = await latestBrief(job.brandId);
+// Daily sweep, piggybacked on a poll that already touched the database so it never wakes Neon by itself.
+const CLEANUP_EVERY_MS = 24 * 60 * 60 * 1000;
+let lastCleanup = 0;
+async function maybeCleanup() {
+  if (Date.now() - lastCleanup < CLEANUP_EVERY_MS) return;
+  lastCleanup = Date.now();
   try {
-    const result = await def.run(job.spec, {
-      brief: brief.fields,
-      progress: (step, note) => addAgentProgress(job.id, step, note),
-    });
-    if (def.fulfiller === "hybrid") {
-      // Agent drafted it; an operator reviews and delivers from the ops console.
-      await addAgentProgress(job.id, "", "Agent draft ready for operator review");
-      console.log(`[ops] ${def.title} ${job.id} has an agent draft awaiting review`);
-      return;
-    }
-    await deliverJob(job.id, result, "agent");
-    console.log(`[worker] delivered ${job.id}`);
+    await cleanupExpired();
+    console.log("[worker] cleanup done");
   } catch (err) {
-    console.error(`[worker] job ${job.id} failed`, err);
-    const reason = `${describeAnthropicError(err)} (${err instanceof Error ? err.message : String(err)})`;
-    await failJob(job.id, reason.slice(0, 500)).catch((e) => console.error("[worker] could not mark failed", e));
+    console.error("[worker] cleanup failed", err);
+    reportError(err);
   }
 }
 
+const POLL_MS = Number(process.env.WORKER_POLL_MS ?? 3000);
+let stopping = false;
+let wake: (() => void) | null = null;
+
+function sleep(ms: number) {
+  return new Promise<void>((resolve) => {
+    const timer = setTimeout(done, ms);
+    function done() {
+      clearTimeout(timer);
+      wake = null;
+      resolve();
+    }
+    wake = done;
+  });
+}
+
+function authorized(header: string | undefined) {
+  const token = process.env.WORKER_TOKEN;
+  if (!token) return false;
+  const a = Buffer.from(header ?? "");
+  const b = Buffer.from(`Bearer ${token}`);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+const port = Number(process.env.WORKER_PORT ?? process.env.PORT ?? 0);
+const server = port
+  ? createServer((req, res) => {
+      if (req.method === "GET" && req.url === "/health") return res.writeHead(200).end("ok");
+      if (req.method === "POST" && req.url === "/wake") {
+        if (!authorized(req.headers.authorization)) return res.writeHead(401).end();
+        wake?.();
+        return res.writeHead(202).end();
+      }
+      res.writeHead(404).end();
+    }).listen(port, "::", () => console.log(`[worker] wake endpoint on :${port}`))
+  : null;
+
 async function loop() {
-  console.log("[worker] started");
+  console.log(`[worker] started, idle poll ${POLL_MS}ms`);
   while (!stopping) {
     try {
       const job = await claimNextAgentJob();
+      await maybeCleanup();
       if (job) {
         await runJob(job);
         continue;
       }
     } catch (err) {
       console.error("[worker] poll failed", err);
+      reportError(err);
     }
-    await new Promise((r) => setTimeout(r, POLL_MS));
+    await sleep(POLL_MS);
   }
+  server?.close();
+  await flushMonitoring();
   await sql.end();
 }
 
 for (const sig of ["SIGINT", "SIGTERM"] as const) {
   process.on(sig, () => {
     stopping = true;
+    wake?.();
   });
 }
 

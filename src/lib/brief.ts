@@ -1,13 +1,17 @@
 import { z } from "zod";
 
-// Frozen v1 brief schema. Every surface (web chat, jobs, MCP) reads and writes these fields.
+// Brief schema. Every surface (web chat, jobs, MCP) reads and writes these fields. The Brand Builder
+// owns the canonical copy; keys map 1:1 to its brief sections (SECTION_OF in lib/builder/client.ts).
 export const BRIEF_FIELDS = [
   "oneLiner",
   "customer",
   "problem",
+  "alternative",
   "positioning",
+  "competitors",
   "price",
   "channels",
+  "goals",
   "nameDirections",
   "openQuestions",
 ] as const;
@@ -19,9 +23,12 @@ export const briefFieldsSchema = z
     oneLiner: z.string().describe("One sentence: what the brand sells and to whom."),
     customer: z.string().describe("Who buys it. Be specific about the person and situation."),
     problem: z.string().describe("The problem or desire the product addresses."),
+    alternative: z.string().describe("What the customer uses or does today instead."),
     positioning: z.string().describe("How it is different from what the customer buys today."),
+    competitors: z.array(z.string()).describe("Named brands the customer would compare it with."),
     price: z.string().describe("Target retail price or range, e.g. '$38 per kit'."),
     channels: z.array(z.string()).describe("Where it will sell, e.g. ['Shopify store', 'Amazon']."),
+    goals: z.string().describe("What the founder wants from the next 3 to 6 months, e.g. 'First 100 orders by March'."),
     nameDirections: z.array(z.string()).describe("Candidate brand names or naming directions."),
     openQuestions: z.array(z.string()).describe("Unresolved questions to come back to."),
   })
@@ -33,9 +40,12 @@ export const BRIEF_LABELS: Record<BriefFieldKey, string> = {
   oneLiner: "One-liner",
   customer: "Customer",
   problem: "Problem",
+  alternative: "What they use today",
   positioning: "Positioning",
+  competitors: "Competitors",
   price: "Price",
   channels: "Channels",
+  goals: "Goals",
   nameDirections: "Name directions",
   openQuestions: "Open questions",
 };
@@ -71,6 +81,12 @@ export function mergeBrief(current: BriefFields, patch: BriefFields): { fields: 
     }
   }
   return { fields, diff };
+}
+
+/** First number in a price string: "$38 per kit" -> 38. */
+export function parsePrice(text: string | undefined): number | null {
+  const m = text?.match(/\d+(?:\.\d+)?/);
+  return m ? Number(m[0]) : null;
 }
 
 export function formatValue(value: unknown): string {

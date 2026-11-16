@@ -7,7 +7,12 @@ import type { JobStatus } from "@/lib/jobs/types";
 import { appUrl, devCheckoutAllowed, stripe } from "@/lib/stripe";
 import type { MessageAttachments } from "@/lib/types";
 import { type Ctx, ForbiddenError, InvalidStateError, NotFoundError } from "./context";
-import { advanceStage, getBrand, getOwnedBrand } from "./brands";
+import { advanceStage, getBrand, getMemberBrand, getOwnedBrand } from "./brands";
+import { builder } from "@/lib/builder/client";
+import { demoMode } from "@/lib/demo/script";
+import { wakeWorker } from "@/lib/worker-wake";
+import { hostResearch } from "@/lib/anthropic";
+import { ensureBuilderBrand, pullBrief } from "./builder-sync";
 import { latestBrief, updateBrandBrief } from "./brief";
 import { postToBrand, updateMessageAttachments } from "./conversations";
 import { emitBrandEvent, emitOpsEvent } from "./events";
@@ -68,6 +73,7 @@ export function jobView(job: Job, events: JobEvent[]) {
     fulfillerLabel: def.fulfillerLabel,
     steps: def.steps,
     reachedStep: reachedStepIndex(def, job.status, progressSteps),
+    awaitingHost: job.hostRun && job.status === "in_progress",
     events,
   };
 }
@@ -104,8 +110,10 @@ export async function listJobs(ctx: Ctx, brandId: string) {
 
 /** Create a quoted job. Spec fields not given are drafted from the brief. */
 export async function quoteJob(ctx: Ctx, brandId: string, type: string, specInput: Record<string, unknown> = {}) {
-  await getOwnedBrand(ctx, brandId);
+  // Any member may ask for a quote; only the owner approves and pays.
+  await getMemberBrand(ctx, brandId);
   const def = jobType(type);
+  await def.precheck?.(brandId);
   const brief = await latestBrief(brandId);
   const drafted = def.draftSpec(brief.fields) as Record<string, unknown>;
   const spec = def.specSchema.parse({ ...drafted, ...stripEmpty(specInput) }) as Record<string, unknown>;
@@ -127,7 +135,7 @@ function stripEmpty(input: Record<string, unknown>) {
 
 export async function updateJobSpec(ctx: Ctx, jobId: string, specInput: Record<string, unknown>) {
   const job = await loadJob(jobId);
-  await getOwnedBrand(ctx, job.brandId);
+  await getMemberBrand(ctx, job.brandId);
   if (job.status !== "quoted" && job.status !== "draft") throw new InvalidStateError("Spec can only change before approval");
   const def = jobType(job.type);
   const spec = def.specSchema.parse({ ...job.spec, ...specInput }) as Record<string, unknown>;
@@ -145,8 +153,9 @@ export async function approveJob(ctx: Ctx, jobId: string): Promise<{ job: JobVie
   const brand = await getOwnedBrand(ctx, job.brandId);
   if (job.status !== "quoted") throw new InvalidStateError(`Job is ${job.status}; only quoted jobs can be approved`);
 
-  if (job.priceCents === 0) {
-    await transition(jobId, "approved", "user", { actorId: ctx.userId });
+  // BETA_FREE_JOBS=1: private beta runs every job without checkout.
+  if (job.priceCents === 0 || process.env.BETA_FREE_JOBS === "1") {
+    await transition(jobId, "approved", "user", { actorId: ctx.userId, ...(job.priceCents > 0 && { note: "Free during beta" }) });
     await startJob(jobId);
     return { job: await getJob(ctx, jobId) };
   }
@@ -196,6 +205,16 @@ async function startJob(jobId: string) {
     // Notify ops. A real deployment would page/email; the ops console listens on the ops channel.
     console.log(`[ops] New ${def.title} job ${job.id} needs an operator: ${appUrl()}/ops/jobs/${job.id}`);
     await addEvent(jobId, "progress", { note: "Ops notified" }, "system");
+  } else if (demoMode()) {
+    // Demo: no worker process; run in this one. Claimed first so a stray worker skips it.
+    await db.update(schema.jobs).set({ agentClaimedAt: new Date() }).where(eq(schema.jobs.id, jobId));
+    void import("@/lib/jobs/runner").then((m) => m.runJob(job));
+  } else if (def.researchTask && hostResearch()) {
+    // Claimed so the worker skips it; the founder's assistant picks it up over MCP.
+    await db.update(schema.jobs).set({ agentClaimedAt: new Date(), hostRun: true }).where(eq(schema.jobs.id, jobId));
+    await addEvent(jobId, "progress", { note: "Waiting for your assistant (Claude or Codex) to run the research" }, "system");
+  } else {
+    wakeWorker();
   }
   return job;
 }
@@ -318,6 +337,17 @@ export async function deliverJob(jobId: string, rawResult: unknown, actor: Actor
   return delivered;
 }
 
+/** The founder's assistant finished a host-run job. Validation errors go back to the assistant to fix. */
+export async function submitHostResult(ctx: Ctx, jobId: string, rawResult: unknown) {
+  const job = await loadJob(jobId);
+  await getBrand(ctx, job.brandId);
+  if (!job.hostRun || job.status !== "in_progress") {
+    throw new InvalidStateError(`This job is ${job.status} and isn't waiting on your assistant`);
+  }
+  await deliverJob(jobId, rawResult, "agent", ctx.userId);
+  return getJob(ctx, jobId);
+}
+
 /** Agent failure. The reason goes to ops; the founder gets a plain status and no internals. */
 export async function failJob(jobId: string, reason: string) {
   const job = await transition(jobId, "failed", "agent", { note: reason });
@@ -334,13 +364,19 @@ export async function applyProposedEdit(ctx: Ctx, messageId: string, index: numb
   const msg = await db.query.messages.findFirst({ where: eq(schema.messages.id, messageId) });
   if (!msg) throw new NotFoundError("Message not found");
   const conv = await db.query.conversations.findFirst({ where: eq(schema.conversations.id, msg.conversationId) });
-  await getOwnedBrand(ctx, conv!.brandId);
+  await getMemberBrand(ctx, conv!.brandId);
   const edits = msg.attachments.proposedEdits ?? [];
   const edit = edits[index];
   if (!edit) throw new NotFoundError("Edit not found");
   if (edit.applied) return msg;
-  const patch = briefFieldsSchema.parse(edit.patch);
-  await updateBrandBrief(ctx, conv!.brandId, patch, "job");
+  if (edit.builderProposalId) {
+    // Accepting in the builder applies it there; pulling brings it into the cache and the live brief.
+    const { actAs, builderBrandId } = await ensureBuilderBrand(conv!.brandId);
+    await builder().acceptProposal(actAs, builderBrandId, edit.builderProposalId);
+    await pullBrief(conv!.brandId);
+  } else {
+    await updateBrandBrief(ctx, conv!.brandId, briefFieldsSchema.parse(edit.patch), "job");
+  }
   edits[index] = { ...edit, applied: true };
   return updateMessageAttachments(messageId, { ...msg.attachments, proposedEdits: edits });
 }

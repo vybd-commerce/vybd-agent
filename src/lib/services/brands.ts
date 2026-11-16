@@ -1,9 +1,11 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 import { customAlphabet } from "nanoid";
 import { db, schema } from "@/db";
 import type { Stage } from "@/lib/types";
 import { STAGES } from "@/lib/types";
 import { type Ctx, ForbiddenError, NotFoundError } from "./context";
+import { builderEnabled } from "@/lib/builder/client";
+import { ensureBuilderBrand } from "./builder-sync";
 import { emitBrandEvent } from "./events";
 
 const slugSuffix = customAlphabet("abcdefghijkmnpqrstuvwxyz23456789", 6);
@@ -19,12 +21,17 @@ function slugify(name: string) {
   return `${base || "brand"}-${slugSuffix()}`;
 }
 
+/** Brands the caller owns or is a member of, newest first. */
 export async function listBrands(ctx: Ctx) {
-  return db
-    .select()
+  const rows = await db
+    .select({ brand: schema.brands })
     .from(schema.brands)
-    .where(eq(schema.brands.ownerId, ctx.userId))
+    .innerJoin(
+      schema.brandMembers,
+      and(eq(schema.brandMembers.brandId, schema.brands.id), eq(schema.brandMembers.userId, ctx.userId)),
+    )
     .orderBy(desc(schema.brands.createdAt));
+  return rows.map((r) => r.brand);
 }
 
 export async function createBrand(ctx: Ctx, input: { name?: string }) {
@@ -33,15 +40,34 @@ export async function createBrand(ctx: Ctx, input: { name?: string }) {
     .insert(schema.brands)
     .values({ ownerId: ctx.userId, name, slug: slugify(name) })
     .returning();
+  await db.insert(schema.brandMembers).values({ brandId: brand.id, userId: ctx.userId, role: "owner" });
   await db.insert(schema.briefVersions).values({ brandId: brand.id, version: 0, fields: {}, source: "chat" });
+  // Link the Brand Builder brand now; if the builder is down, the first brief read or write retries.
+  if (builderEnabled()) await ensureBuilderBrand(brand.id).catch((err) => console.error("[builder] provision failed", err));
   return brand;
 }
 
-/** Load a brand the caller may access. Operators can read any brand (they fulfil its jobs). */
+export async function isMember(brandId: string, userId: string) {
+  const row = await db.query.brandMembers.findFirst({
+    where: and(eq(schema.brandMembers.brandId, brandId), eq(schema.brandMembers.userId, userId)),
+  });
+  return Boolean(row);
+}
+
+/** Load a brand the caller may read: owner, member, or operator (they fulfil its jobs). */
 export async function getBrand(ctx: Ctx, brandId: string): Promise<Brand> {
   const brand = await db.query.brands.findFirst({ where: eq(schema.brands.id, brandId) });
   if (!brand) throw new NotFoundError("Brand not found");
-  if (brand.ownerId !== ctx.userId && ctx.role !== "operator") throw new ForbiddenError("Not your brand");
+  if (brand.ownerId === ctx.userId || ctx.role === "operator") return brand;
+  if (!(await isMember(brandId, ctx.userId))) throw new ForbiddenError("Not your brand");
+  return brand;
+}
+
+/** Load a brand the caller works on as part of the team: owner or member. Chat, brief edits, quotes. */
+export async function getMemberBrand(ctx: Ctx, brandId: string): Promise<Brand> {
+  const brand = await db.query.brands.findFirst({ where: eq(schema.brands.id, brandId) });
+  if (!brand) throw new NotFoundError("Brand not found");
+  if (brand.ownerId !== ctx.userId && !(await isMember(brandId, ctx.userId))) throw new ForbiddenError("Not your brand");
   return brand;
 }
 
@@ -49,6 +75,28 @@ export async function getOwnedBrand(ctx: Ctx, brandId: string): Promise<Brand> {
   const brand = await getBrand(ctx, brandId);
   if (brand.ownerId !== ctx.userId) throw new ForbiddenError("Not your brand");
   return brand;
+}
+
+export type Member = { userId: string; name: string | null; email: string | null; image: string | null; role: "owner" | "member" };
+
+/** Everyone on the brand, owner first, then by join date. */
+export async function listMembers(brandId: string): Promise<Member[]> {
+  const rows = await db
+    .select({
+      userId: schema.users.id,
+      name: schema.users.name,
+      email: schema.users.email,
+      image: schema.users.image,
+      role: schema.brandMembers.role,
+      joinedAt: schema.brandMembers.joinedAt,
+    })
+    .from(schema.brandMembers)
+    .innerJoin(schema.users, eq(schema.users.id, schema.brandMembers.userId))
+    .where(eq(schema.brandMembers.brandId, brandId))
+    .orderBy(asc(schema.brandMembers.joinedAt));
+  return rows
+    .sort((a, b) => (a.role === b.role ? 0 : a.role === "owner" ? -1 : 1))
+    .map((m) => ({ userId: m.userId, name: m.name, email: m.email, image: m.image, role: m.role }));
 }
 
 export async function getBrandBySlug(slug: string) {

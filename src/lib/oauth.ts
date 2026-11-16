@@ -1,5 +1,5 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { and, eq, gt, isNull } from "drizzle-orm";
+import { and, eq, gt, isNull, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { appUrl } from "@/lib/stripe";
 
@@ -56,10 +56,35 @@ export function validRedirectUri(uri: string) {
     const u = new URL(uri);
     if (u.hash) return false;
     // https anywhere; http only for loopback (local MCP clients such as the inspector).
-    return u.protocol === "https:" || (u.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(u.hostname));
+    return u.protocol === "https:" || (u.protocol === "http:" && LOOPBACK.includes(u.hostname));
   } catch {
     return false;
   }
+}
+
+const LOOPBACK = ["localhost", "127.0.0.1", "[::1]"];
+
+/**
+ * Exact match, except loopback redirects may use any port (RFC 8252 §7.3): CLI clients such as
+ * Claude Code and Codex bind a free port for each login.
+ */
+export function redirectUriAllowed(registered: string[], uri: string) {
+  if (registered.includes(uri)) return true;
+  let u: URL;
+  try {
+    u = new URL(uri);
+  } catch {
+    return false;
+  }
+  if (u.protocol !== "http:" || !LOOPBACK.includes(u.hostname)) return false;
+  return registered.some((r) => {
+    try {
+      const v = new URL(r);
+      return v.protocol === "http:" && v.hostname === u.hostname && v.pathname === u.pathname && v.search === u.search;
+    } catch {
+      return false;
+    }
+  });
 }
 
 export async function registerClient(input: { redirect_uris?: unknown; client_name?: unknown; token_endpoint_auth_method?: unknown }) {
@@ -182,4 +207,15 @@ export async function verifyAccessToken(bearer: string | null) {
     ),
   });
   return row ? { userId: row.userId, clientId: row.clientId } : null;
+}
+
+/** Sweep expired OAuth rows and old rate-limit windows. Safe to run any time; the worker runs it daily. */
+export async function cleanupExpired() {
+  await db.execute(sql`delete from oauth_codes where expires_at < now()`);
+  // Refresh tokens live 30 days from issue; rotated (revoked) rows are dead at once.
+  await db.execute(sql`delete from oauth_tokens where created_at < now() - interval '31 days' or revoked_at < now() - interval '1 day'`);
+  await db.execute(sql`delete from oauth_clients c where c.created_at < now() - interval '7 days'
+    and not exists (select 1 from oauth_tokens t where t.client_id = c.id)
+    and not exists (select 1 from oauth_codes o where o.client_id = c.id)`);
+  await db.execute(sql`delete from rate_limits where window_start < now() - interval '1 day'`);
 }

@@ -2,7 +2,7 @@ import { and, asc, desc, eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import type { MessageAttachments } from "@/lib/types";
 import { type Ctx, NotFoundError } from "./context";
-import { getBrand, getOwnedBrand } from "./brands";
+import { getBrand, getMemberBrand } from "./brands";
 import { emitBrandEvent } from "./events";
 
 export type Message = typeof schema.messages.$inferSelect;
@@ -18,7 +18,7 @@ export async function listConversations(ctx: Ctx, brandId: string) {
 
 /** Latest conversation on the given channel, creating one if none exists. */
 export async function ensureConversation(ctx: Ctx, brandId: string, channel: "web" | "mcp" = "web") {
-  await getOwnedBrand(ctx, brandId);
+  await getMemberBrand(ctx, brandId);
   return latestConversation(brandId, channel, true);
 }
 
@@ -50,11 +50,11 @@ export async function listMessages(ctx: Ctx, conversationId: string) {
 
 export async function appendMessage(
   conversationId: string,
-  input: { role: Message["role"]; content: string; attachments?: MessageAttachments },
+  input: { role: Message["role"]; content: string; attachments?: MessageAttachments; authorId?: string },
 ) {
   const [msg] = await db
     .insert(schema.messages)
-    .values({ conversationId, role: input.role, content: input.content, attachments: input.attachments ?? {} })
+    .values({ conversationId, role: input.role, authorId: input.authorId, content: input.content, attachments: input.attachments ?? {} })
     .returning();
   const conv = await db.query.conversations.findFirst({ where: eq(schema.conversations.id, conversationId) });
   if (conv) await emitBrandEvent(conv.brandId, { type: "message", conversationId });

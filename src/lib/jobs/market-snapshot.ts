@@ -1,9 +1,10 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import { anthropic, FALLBACK_PARAMS, MODEL } from "@/lib/anthropic";
-import { formatValue } from "@/lib/brief";
+import { BRIEF_FIELDS, formatValue, parsePrice } from "@/lib/brief";
+import { DEMO_SNAPSHOT, demoMode } from "@/lib/demo/script";
 import { PRICES } from "./prices";
-import type { JobTypeDef } from "./types";
+import type { AgentRunHelpers, JobTypeDef, ResearchTask } from "./types";
 
 export const snapshotSpecSchema = z.object({
   market: z.string().default("US online").describe("Target market. Default 'US online'."),
@@ -55,7 +56,7 @@ Research with web search. Find 5 to 10 real, currently operating direct competit
 
 Then build a price band (low and high of comparable products, numbers in USD) and mark the founder's price if they gave one. Write the open lane as one plain sentence: the position nobody owns that this founder could.
 
-Propose up to 3 brief edits the evidence supports, e.g. {"label":"Price confirmed","patch":{"price":"$38 per kit"}} or a sharper positioning. Brief field keys: oneLiner, customer, problem, positioning, price, channels, nameDirections, openQuestions.
+Propose up to 3 brief edits the evidence supports, e.g. {"label":"Price confirmed","patch":{"price":"$38 per kit"}} or a sharper positioning. Brief field keys: ${BRIEF_FIELDS.join(", ")}.
 
 When done, call submit_snapshot once with the full result.`;
 
@@ -136,9 +137,26 @@ async function runSnapshot(spec: SnapshotSpec, helpers: { progress: (step: strin
   throw new Error("Research agent did not finish the snapshot.");
 }
 
-function parsePrice(text: string | undefined): number | null {
-  const m = text?.match(/\d+(?:\.\d+)?/);
-  return m ? Number(m[0]) : null;
+/** Demo mode: canned competitors after a short, visible "research" pause. */
+async function demoSnapshot(spec: SnapshotSpec, helpers: AgentRunHelpers): Promise<SnapshotResult> {
+  const pause = () => new Promise((r) => setTimeout(r, 2500));
+  await helpers.progress("research", "Searching competitors");
+  await pause();
+  await helpers.progress("pricing", "Building the price band");
+  await pause();
+  return snapshotResultSchema.parse({ ...DEMO_SNAPSHOT, priceBand: { ...DEMO_SNAPSHOT.priceBand, userPrice: parsePrice(spec.price) } });
+}
+
+/** Host-run version: the founder's assistant does the searching with its own tools. */
+function researchTask(spec: SnapshotSpec): ResearchTask {
+  return {
+    instructions: RESEARCH_SYSTEM.replace(
+      "When done, call submit_snapshot once with the full result.",
+      "When done, call submit_job_result once with this job's jobId and the full result as `result`.",
+    ),
+    brief: briefPrompt(spec),
+    resultSchema: SUBMIT_TOOL.input_schema as Record<string, unknown>,
+  };
 }
 
 export const marketSnapshot: JobTypeDef<SnapshotSpec, SnapshotResult> = {
@@ -161,6 +179,7 @@ export const marketSnapshot: JobTypeDef<SnapshotSpec, SnapshotResult> = {
         .join(". "),
     }),
   quote: () => PRICES.market_snapshot,
+  researchTask,
   steps: [
     { key: "spec", label: "Brief read" },
     { key: "research", label: "Competitors researched" },
@@ -188,7 +207,7 @@ export const marketSnapshot: JobTypeDef<SnapshotSpec, SnapshotResult> = {
       { key: "openLane", label: "Open lane", type: "textarea" },
     ],
   },
-  run: (spec, helpers) => runSnapshot(spec, helpers),
+  run: (spec, helpers) => (demoMode() ? demoSnapshot(spec, helpers) : runSnapshot(spec, helpers)),
   summarize: (result, brief) => {
     const band = `$${result.priceBand.low}–$${result.priceBand.high}`;
     const userPrice = result.priceBand.userPrice ?? parsePrice(brief.price);

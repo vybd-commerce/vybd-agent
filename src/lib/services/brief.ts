@@ -2,8 +2,9 @@ import { desc, eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { type BriefFields, type BriefFieldKey, BRIEF_FIELDS, mergeBrief, isUsable } from "@/lib/brief";
 import type { Ctx } from "./context";
-import { getBrand, getOwnedBrand } from "./brands";
+import { getBrand, getMemberBrand } from "./brands";
 import { emitBrandEvent } from "./events";
+import { pullBrief, pushBrief } from "./builder-sync";
 
 // Drizzle wraps driver errors; the Postgres code may be on the error or its cause.
 function isUniqueViolation(err: unknown) {
@@ -18,12 +19,20 @@ export async function latestBrief(brandId: string) {
     where: eq(schema.briefVersions.brandId, brandId),
     orderBy: desc(schema.briefVersions.version),
   });
-  return row ?? { version: 0, fields: {} as BriefFields, pending: [] as string[], source: "chat" as const };
+  return (
+    row ?? { version: 0, fields: {} as BriefFields, pending: [] as string[], source: "chat" as const, createdAt: null, builderVersion: null }
+  );
+}
+
+/** The brief as the Brand Builder has it now, via the cache. `stale` when the builder couldn't be reached. */
+export async function syncedBrief(brandId: string) {
+  const { stale } = await pullBrief(brandId);
+  return { ...(await latestBrief(brandId)), stale };
 }
 
 export async function getBrandBrief(ctx: Ctx, brandId: string) {
   const brand = await getBrand(ctx, brandId);
-  const brief = await latestBrief(brandId);
+  const brief = await syncedBrief(brandId);
   return {
     brandId,
     name: brand.name,
@@ -32,12 +41,15 @@ export async function getBrandBrief(ctx: Ctx, brandId: string) {
     fields: brief.fields,
     pending: brief.pending,
     usable: isUsable(brief.fields),
+    updatedAt: brief.createdAt?.toISOString() ?? null,
+    stale: brief.stale,
   };
 }
 
 /**
  * Patch brief fields and write a new version. No-op patches (nothing changed) don't bump the version.
  * Retries on version conflicts so concurrent writers (chat + MCP + job) never clobber each other.
+ * Field changes go to the Brand Builder first; if it refuses or is down, nothing is written here.
  */
 export async function updateBrandBrief(
   ctx: Ctx,
@@ -46,7 +58,7 @@ export async function updateBrandBrief(
   source: BriefSource,
   opts: { pending?: BriefFieldKey[]; skipOwnerCheck?: boolean } = {},
 ) {
-  if (!opts.skipOwnerCheck) await getOwnedBrand(ctx, brandId);
+  if (!opts.skipOwnerCheck) await getMemberBrand(ctx, brandId);
   for (let attempt = 0; attempt < 5; attempt++) {
     const current = await latestBrief(brandId);
     const { fields, diff } = mergeBrief(current.fields, patch);
@@ -58,9 +70,14 @@ export async function updateBrandBrief(
     if (changed.length === 0 && !pendingChanged) {
       return { version: current.version, fields: current.fields, diff, pending: current.pending, usable: isUsable(fields) };
     }
+    const builderVersion = changed.length
+      ? await pushBrief(brandId, Object.fromEntries(changed.map((k) => [k, diff[k as BriefFieldKey]!.to])) as BriefFields, source)
+      : current.builderVersion;
     try {
       const version = current.version + 1;
-      await db.insert(schema.briefVersions).values({ brandId, version, fields, pending, source });
+      await db
+        .insert(schema.briefVersions)
+        .values({ brandId, version, fields, pending, source, authorId: ctx.userId, builderVersion });
       await emitBrandEvent(brandId, { type: "brief", version, changed });
       return { version, fields, diff, pending, usable: isUsable(fields) };
     } catch (err) {

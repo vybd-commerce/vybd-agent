@@ -2,13 +2,18 @@ import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import { anthropic, describeAnthropicError, FALLBACK_PARAMS, MODEL } from "@/lib/anthropic";
 import { type BriefDiff, formatValue, BRIEF_FIELDS } from "@/lib/brief";
+import { chatProvider, describeOpenRouterError, type ORMessage, type ORTool, streamCompletion } from "@/lib/openrouter";
+import { listMembers, type Member } from "@/lib/services/brands";
 import { getBrandBrief } from "@/lib/services/brief";
 import type { Ctx } from "@/lib/services/context";
 import { appendMessage, listMessages, type Message } from "@/lib/services/conversations";
 import { getFeedback } from "@/lib/services/feedback";
 import { listJobs, type JobView } from "@/lib/services/jobs";
-import { jsonSchemaFor, runTool, TOOLS } from "@/lib/tools";
+import { scoreFrom } from "@/lib/services/score";
+import { GATE_RESPONSES, GATE_YES, UNLOCK_SCORE } from "@/lib/score";
+import { jsonSchemaFor, runTool, TOOLS, toolsFor } from "@/lib/tools";
 import { DEFAULT_NEXT_STEPS, type MessageAttachments, type NextStep, type NextStepKind } from "@/lib/types";
+import { runDemoTurn } from "@/lib/demo/chat";
 import { ORCHESTRATOR_SYSTEM } from "./prompts";
 
 export type ChatEvent =
@@ -31,13 +36,13 @@ const UI_TOOLS = {
     input: z.object({ chips: z.array(z.string().max(60)).min(1).max(4) }),
   },
   suggest_next_steps: {
-    description: "Show next-step cards (market_snapshot, share_page, find_suppliers) under your message.",
+    description: "Show next-step cards (market_snapshot, share_page, find_suppliers, invite) under your message.",
     input: z.object({ steps: z.array(z.enum(NEXT_STEP_KINDS)).min(1).max(3) }),
   },
 } as const;
 
 // Web chat is scoped to one brand: brand-picking tools are dropped and brandId is injected.
-const WEB_TOOLS = TOOLS.filter((t) => t.name !== "list_brands" && t.name !== "create_brand");
+const WEB_TOOLS = toolsFor("web").filter((t) => t.name !== "list_brands" && t.name !== "create_brand");
 
 function buildTools(): Anthropic.Beta.BetaTool[] {
   const domain = WEB_TOOLS.map((t) => {
@@ -60,12 +65,39 @@ function buildTools(): Anthropic.Beta.BetaTool[] {
 
 const TOOL_DEFS = buildTools();
 
-async function brandState(ctx: Ctx, brandId: string) {
+const OR_TOOLS: ORTool[] = TOOL_DEFS.map((t) => ({
+  type: "function",
+  function: { name: t.name, description: t.description ?? "", parameters: t.input_schema },
+}));
+
+export function memberName(m: Pick<Member, "name" | "email">) {
+  return m.name ?? m.email?.split("@")[0] ?? "Member";
+}
+
+async function brandState(ctx: Ctx, brandId: string, members: Member[]) {
   const [brief, jobs, feedback] = await Promise.all([
     getBrandBrief(ctx, brandId),
     listJobs(ctx, brandId),
     getFeedback(ctx, brandId),
   ]);
+  const me = members.find((m) => m.userId === ctx.userId);
+  const team =
+    members.length > 1
+      ? `Team: ${members.map((m) => `${memberName(m)}${m.role === "owner" ? " (owner)" : ""}`).join(", ")}. This turn is from ${me ? memberName(me) : "a member"}.`
+      : "Team: solo founder (no one invited yet).";
+  const score = scoreFrom({
+    fields: brief.fields,
+    sharePublished: feedback.published,
+    jobs,
+    counted: feedback.counted,
+    members: members.length,
+  });
+  const scoreLine = score.unlocked
+    ? `Brand Score: ${score.score}/100. Bar cleared; Autopilot reward earned.`
+    : `Brand Score: ${score.score}/100 (bar: ${UNLOCK_SCORE} plus ${GATE_RESPONSES} counted responses with ${GATE_YES} "would buy"; gate ${score.gateMet ? "met" : "not met"}). Next quest: ${score.next ? `${score.next.title} (${score.next.detail}): ${score.next.why}` : "none"}. Open quests: ${score.quests
+        .filter((q) => !q.done)
+        .map((q) => `${q.title} ${q.detail}`)
+        .join("; ")}.`;
   const fields = BRIEF_FIELDS.map((k) => `${k}: ${formatValue(brief.fields[k]) || "(empty)"}`).join("\n");
   const jobLines = jobs.length
     ? jobs.map((j) => `- ${j.title} [${j.id}] ${j.status}${j.priceCents ? ` $${j.priceCents / 100}` : ""}`).join("\n")
@@ -81,16 +113,32 @@ Jobs:
 ${jobLines}
 
 ${fb}
+
+${team}
+
+${scoreLine}
 </brand_state>`;
 }
 
-/** Rebuild model history from stored messages. Job and operator notes become assistant text. */
-function toHistory(rows: Message[]): Anthropic.Beta.BetaMessageParam[] {
+/**
+ * Rebuild model history from stored messages. Job and operator notes become assistant text.
+ * On shared brands, user turns are prefixed with the author's name so the agent can tell people apart.
+ */
+function toHistory(rows: Message[], members: Member[]): Anthropic.Beta.BetaMessageParam[] {
   const out: Anthropic.Beta.BetaMessageParam[] = [];
+  const names = members.length > 1 ? new Map(members.map((m) => [m.userId, memberName(m)])) : null;
   for (const m of rows.slice(-40)) {
     if (!m.content.trim()) continue;
     const role = m.role === "user" ? "user" : "assistant";
-    const text = m.role === "operator" ? `(Message from a Vybd operator) ${m.content}` : m.content;
+    const author = names && m.role === "user" && m.authorId ? names.get(m.authorId) : undefined;
+    const text =
+      m.role === "operator"
+        ? `(Message from a Vybd operator) ${m.content}`
+        : m.role === "system"
+          ? `(Note) ${m.content}`
+          : author
+            ? `[${author}] ${m.content}`
+            : m.content;
     const last = out[out.length - 1];
     if (last && last.role === role && typeof last.content === "string") {
       last.content += `\n\n${text}`;
@@ -115,8 +163,9 @@ export async function runChatTurn(opts: {
   signal?: AbortSignal;
 }) {
   const { ctx, brandId, conversationId, emit } = opts;
-  const history = toHistory(await listMessages(ctx, conversationId));
-  const userMessage = await appendMessage(conversationId, { role: "user", content: opts.text });
+  const members = await listMembers(brandId);
+  const history = toHistory(await listMessages(ctx, conversationId), members);
+  const userMessage = await appendMessage(conversationId, { role: "user", content: opts.text, authorId: ctx.userId });
   emit({ type: "user_message", message: userMessage });
 
   const messages: Anthropic.Beta.BetaMessageParam[] = [
@@ -124,7 +173,7 @@ export async function runChatTurn(opts: {
     {
       role: "user",
       content: [
-        { type: "text", text: await brandState(ctx, brandId) },
+        { type: "text", text: await brandState(ctx, brandId, members) },
         { type: "text", text: opts.text },
       ],
     },
@@ -139,9 +188,68 @@ export async function runChatTurn(opts: {
   const briefDiff: BriefDiff = {};
   const jobRefs: string[] = [];
   let jsonRetries = 0;
+  const provider = chatProvider();
+
+  /** Same tool loop as below, over OpenRouter's OpenAI-style API (free models for development). */
+  async function openRouterLoop() {
+    const or: ORMessage[] = [
+      { role: "system", content: ORCHESTRATOR_SYSTEM },
+      ...messages.slice(0, -1).map((m) => ({ role: m.role, content: m.content as string })),
+      { role: "user", content: `${await brandState(ctx, brandId, members)}\n\n${opts.text}` },
+    ];
+    for (let turn = 0; turn < 10; turn++) {
+      const res = await streamCompletion({ messages: or, tools: OR_TOOLS, signal: opts.signal }, (delta) => {
+        text += delta;
+        emit({ type: "text", delta });
+      });
+      if (res.toolCalls.length === 0) break;
+      or.push({ role: "assistant", content: res.content || null, tool_calls: res.toolCalls });
+      for (const call of res.toolCalls) {
+        let input: unknown;
+        try {
+          input = JSON.parse(call.function.arguments || "{}");
+        } catch {
+          or.push({ role: "tool", tool_call_id: call.id, content: "Error: arguments were not valid JSON. Retry the call." });
+          continue;
+        }
+        const use = { type: "tool_use", id: call.id, name: call.function.name, input } as Anthropic.Beta.BetaToolUseBlock;
+        const result = await executeTool(use, { ctx, brandId, emit, attachments, briefDiff, jobRefs });
+        const content = typeof result.content === "string" ? result.content : JSON.stringify(result.content);
+        or.push({ role: "tool", tool_call_id: call.id, content: result.is_error ? `Error: ${content}` : content });
+      }
+      if (text && !text.endsWith("\n")) text += "\n\n";
+    }
+  }
+
+  /** Scripted turn for offline demos (VYBD_DEMO=1); same tool path, no model. */
+  async function demoLoop() {
+    await runDemoTurn({
+      ctx,
+      brandId,
+      text: opts.text,
+      say: async (line) => {
+        for (const word of line.match(/\S+\s*/g) ?? []) {
+          text += word;
+          emit({ type: "text", delta: word });
+          await new Promise((r) => setTimeout(r, 30));
+        }
+      },
+      call: (name, input) =>
+        executeTool({ type: "tool_use", id: `demo_${name}_${Date.now()}`, name, input } as Anthropic.Beta.BetaToolUseBlock, {
+          ctx,
+          brandId,
+          emit,
+          attachments,
+          briefDiff,
+          jobRefs,
+        }),
+    });
+  }
 
   try {
-    for (let turn = 0; turn < 10; turn++) {
+    if (provider === "demo") await demoLoop();
+    else if (provider === "openrouter") await openRouterLoop();
+    else for (let turn = 0; turn < 10; turn++) {
       const stream = anthropic().beta.messages.stream(
         {
           model: MODEL,
@@ -195,7 +303,7 @@ export async function runChatTurn(opts: {
     }
   } catch (err) {
     const aborted = opts.signal?.aborted;
-    const error = aborted ? "Stopped." : describeAnthropicError(err);
+    const error = aborted ? "Stopped." : provider === "openrouter" ? describeOpenRouterError(err) : describeAnthropicError(err);
     if (!aborted) console.error("[chat] turn failed", err);
     const saved = await persist();
     emit({ type: "error", error, message: saved ?? undefined });

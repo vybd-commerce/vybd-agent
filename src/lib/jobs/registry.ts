@@ -1,3 +1,4 @@
+import { brandResearch } from "./brand-research";
 import { findSuppliers } from "./find-suppliers";
 import { marketSnapshot } from "./market-snapshot";
 import type { JobStatus, JobTypeDef } from "./types";
@@ -5,9 +6,10 @@ import type { JobStatus, JobTypeDef } from "./types";
 export const JOB_TYPES = {
   market_snapshot: marketSnapshot,
   find_suppliers: findSuppliers,
+  brand_research: brandResearch,
 } as unknown as Record<string, JobTypeDef>;
 
-export type JobTypeKey = "market_snapshot" | "find_suppliers";
+export type JobTypeKey = "market_snapshot" | "find_suppliers" | "brand_research";
 export const JOB_TYPE_KEYS = Object.keys(JOB_TYPES) as JobTypeKey[];
 
 export function jobType(type: string): JobTypeDef {
