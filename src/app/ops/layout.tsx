@@ -15,6 +15,10 @@ export default async function OpsLayout({ children }: LayoutProps<"/ops">) {
           <Wordmark />
           <span className="text-[13px] text-ink-2">ops</span>
         </Link>
+        <nav className="ml-4 flex gap-3 text-[13px]">
+          <Link href="/ops" className="text-ink-2 hover:text-ink">Jobs</Link>
+          <Link href="/ops/waitlist" className="text-ink-2 hover:text-ink">Waitlist</Link>
+        </nav>
         <Link href="/" className="ml-auto text-[13px] text-ink-2 hover:text-ink">
           Back to app
         </Link>

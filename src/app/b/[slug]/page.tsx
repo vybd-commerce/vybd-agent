@@ -21,7 +21,7 @@ export default async function SharePage({ params }: PageProps<"/b/[slug]">) {
 
   return (
     <main className="mx-auto max-w-[600px] px-4 py-12 md:py-20">
-      <h1 className="text-[32px] leading-[1.1] font-semibold tracking-[-0.02em] md:text-[40px]">{page.name}</h1>
+      <h1 className="text-[36px] leading-[1.1] font-display font-normal tracking-[-0.015em] md:text-[44px]">{page.name}</h1>
       {f.oneLiner && <p className="mt-4 text-[18px] leading-snug text-ink-2">{String(f.oneLiner)}</p>}
       {price && <p className="mt-6 font-mono text-[15px]">{price}</p>}
       <dl className="mt-10 space-y-5">
@@ -33,7 +33,7 @@ export default async function SharePage({ params }: PageProps<"/b/[slug]">) {
         ))}
       </dl>
       <section className="mt-12 border-t border-line pt-8">
-        <h2 className="text-[20px] font-semibold tracking-[-0.01em]">Would you buy this?</h2>
+        <h2 className="text-[24px] font-display font-normal tracking-[-0.015em]">Would you buy this?</h2>
         <p className="mt-1 text-ink-2">It’s an idea in progress. An honest answer helps more than a kind one.</p>
         <FeedbackForm slug={page.slug} price={price} />
       </section>

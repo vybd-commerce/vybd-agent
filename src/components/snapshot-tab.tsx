@@ -30,7 +30,7 @@ function PriceBand({ band }: { band: SnapshotResult["priceBand"] }) {
         />
         {band.userPrice != null && (
           <div className="absolute top-0 -translate-x-1/2 text-center" style={{ left: pct(band.userPrice) }}>
-            <span className="block font-mono text-[11px] text-accent">You ${band.userPrice}</span>
+            <span className="block font-mono text-[11px] text-accent-text">You ${band.userPrice}</span>
             <span className="mx-auto mt-0.5 block h-4 w-0.5 rounded bg-accent" />
           </div>
         )}
@@ -87,7 +87,7 @@ export function SnapshotTab({ jobs, onNextStep, busy }: { jobs: JobView[]; onNex
           {r.competitors.map((c, i) => (
             <li key={i} className="py-2.5">
               <div className="flex items-baseline justify-between gap-2">
-                <a href={c.url} target="_blank" rel="noreferrer" className="truncate font-medium hover:text-accent hover:underline">
+                <a href={c.url} target="_blank" rel="noreferrer" className="truncate font-medium hover:text-accent-text hover:underline">
                   {c.name}
                 </a>
                 <span className="shrink-0 font-mono text-[12px]">{c.kitPrice}</span>
@@ -95,7 +95,7 @@ export function SnapshotTab({ jobs, onNextStep, busy }: { jobs: JobView[]; onNex
               <p className="text-[13px] text-ink-2">{c.angle}</p>
               <p className="mt-0.5 flex justify-between gap-2 font-mono text-[11px] text-ink-3">
                 <span>{c.productCount} products</span>
-                <a href={c.sourceUrl} target="_blank" rel="noreferrer" className="truncate hover:text-accent">
+                <a href={c.sourceUrl} target="_blank" rel="noreferrer" className="truncate hover:text-accent-text">
                   Source: {hostname(c.sourceUrl)}
                 </a>
               </p>

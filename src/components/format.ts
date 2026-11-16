@@ -25,7 +25,7 @@ export function jobStatusLine(job: JobView) {
       return checkoutOpened ? "Awaiting payment" : "Quote ready";
     case "approved":
     case "in_progress":
-      return `Running · ${by}`;
+      return job.awaitingHost ? "Waiting for your Claude or Codex" : `Running · ${by}`;
     case "delivered":
     case "accepted": {
       const done = [...job.events].reverse().find((e) => e.kind === "status" && e.payload.to === "delivered");
@@ -39,4 +39,13 @@ export function jobStatusLine(job: JobView) {
     default:
       return job.status;
   }
+}
+
+/** "just now", "5 min ago", "3 h ago", "2 days ago". */
+export function timeAgo(iso: string, now = Date.now()) {
+  const mins = Math.floor((now - new Date(iso).getTime()) / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins} min ago`;
+  const hours = Math.floor(mins / 60);
+  return hours < 48 ? `${hours} h ago` : `${Math.floor(hours / 24)} days ago`;
 }

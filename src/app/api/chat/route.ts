@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { runChatTurn, type ChatEvent } from "@/lib/agent/orchestrator";
-import { getOwnedBrand } from "@/lib/services/brands";
+import { getMemberBrand } from "@/lib/services/brands";
 import { ensureConversation } from "@/lib/services/conversations";
 import { getCtx } from "@/lib/session";
 import { errorResponse } from "@/lib/http";
@@ -17,7 +17,7 @@ export async function POST(req: Request) {
   if (!parsed.success) return Response.json({ error: "Invalid request" }, { status: 400 });
   const { brandId, text } = parsed.data;
   try {
-    await getOwnedBrand(ctx, brandId);
+    await getMemberBrand(ctx, brandId);
   } catch (err) {
     return errorResponse(err);
   }

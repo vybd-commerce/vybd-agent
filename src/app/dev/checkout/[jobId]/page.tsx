@@ -27,14 +27,14 @@ export default async function DevCheckout({ params }: PageProps<"/dev/checkout/[
     <main className="flex min-h-full items-center justify-center px-4 py-16">
       <div className="w-full max-w-[360px]">
         <Wordmark />
-        <p className="mt-8 rounded-lg bg-accent-soft px-3 py-2 text-[13px] text-accent">
+        <p className="mt-8 rounded-lg bg-accent-soft px-3 py-2 text-[13px] text-accent-text">
           Test checkout. Stripe keys aren’t set, so no card is charged.
         </p>
-        <h1 className="mt-6 text-[20px] font-semibold">{job.title}</h1>
+        <h1 className="mt-6 text-[24px] font-display font-normal">{job.title}</h1>
         <p className="text-ink-2">{brand.name}</p>
         <p className="mt-4 font-mono text-[24px]">{formatPrice(job.priceCents)}</p>
         <form action={pay} className="mt-6 flex gap-2">
-          <button className="h-10 flex-1 rounded-lg bg-accent font-medium text-white">Pay {formatPrice(job.priceCents)}</button>
+          <button className="h-10 flex-1 rounded-full bg-accent font-medium text-accent-ink">Pay {formatPrice(job.priceCents)}</button>
           <a href={`/brands/${brand.id}?job=${job.id}`} className="h-10 rounded-lg border border-line px-4 leading-10 font-medium">
             Cancel
           </a>

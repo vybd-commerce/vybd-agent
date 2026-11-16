@@ -25,11 +25,11 @@ export function ProgressList({
               {state === "done" ? (
                 <span className="flex h-4 w-4 items-center justify-center rounded-full bg-accent">
                   <svg width="9" height="9" viewBox="0 0 10 10" fill="none">
-                    <path d="M2 5.2 4.1 7.3 8 3" stroke="white" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                    <path d="M2 5.2 4.1 7.3 8 3" stroke="var(--accent-ink)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
                   </svg>
                 </span>
               ) : state === "current" ? (
-                <span className="h-4 w-4 rounded-full border-2 border-accent" />
+                <span className="h-4 w-4 rounded-full border-2 border-focus" />
               ) : (
                 <span className="h-4 w-4 rounded-full border-[1.5px] border-line" />
               )}

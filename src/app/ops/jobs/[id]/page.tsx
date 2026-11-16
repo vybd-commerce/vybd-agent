@@ -27,7 +27,7 @@ export default async function OpsJobPage({ params }: PageProps<"/ops/jobs/[id]">
       </Link>
       <div className="mt-3 flex flex-wrap items-baseline justify-between gap-3">
         <div>
-          <h1 className="text-[20px] font-semibold tracking-[-0.01em]">
+          <h1 className="text-[24px] font-display font-normal tracking-[-0.015em]">
             {job.title} for {brand.name}
           </h1>
           <p className="font-mono text-[12px] text-ink-3">

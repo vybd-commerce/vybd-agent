@@ -1,12 +1,16 @@
 "use server";
 
+import { cookies, headers } from "next/headers";
+import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
-import { signIn, signOut } from "@/auth";
+import { REFERRAL_COOKIE, signIn, signOut } from "@/auth";
+import { INVITE_COOKIE, approveWaitlist } from "@/lib/services/beta";
 import { briefFieldsSchema, type BriefFieldKey } from "@/lib/brief";
 import { createBrand, renameBrand, setShareSettings } from "@/lib/services/brands";
 import { updateBrandBrief } from "@/lib/services/brief";
 import { createSharePage, feedbackInputSchema, submitFeedback } from "@/lib/services/feedback";
+import { acceptInvite, getOrCreateInvite, resetInvite } from "@/lib/services/invites";
 import {
   acceptJob,
   applyProposedEdit,
@@ -20,7 +24,7 @@ import {
   quoteJob,
   updateJobSpec,
 } from "@/lib/services/jobs";
-import { requireCtx } from "@/lib/session";
+import { getCtx, requireCtx } from "@/lib/session";
 
 export type ActionResult<T = unknown> = { ok: true; data: T } | { ok: false; error: string };
 
@@ -36,14 +40,38 @@ async function wrap<T>(fn: () => Promise<T>): Promise<ActionResult<T>> {
 
 // ---------- Auth ----------
 
+/** Remember which share page sent this visitor, so the new account is credited to that brand. */
+async function rememberReferral(formData: FormData) {
+  const ref = String(formData.get("ref") ?? "");
+  if (!/^[a-z0-9-]{1,64}$/.test(ref)) return;
+  (await cookies()).set(REFERRAL_COOKIE, ref, { httpOnly: true, sameSite: "lax", maxAge: 60 * 60 * 24, path: "/" });
+}
+
+/** Signing in from a /join link: keep the invite token so the beta gate lets the invitee through. */
+async function rememberInvite(formData: FormData) {
+  const match = /^\/join\/([A-Za-z0-9_-]{1,64})$/.exec(String(formData.get("next") ?? ""));
+  if (!match) return;
+  (await cookies()).set(INVITE_COOKIE, match[1], { httpOnly: true, sameSite: "lax", maxAge: 60 * 60 * 24, path: "/" });
+}
+
 export async function signInWithEmail(formData: FormData) {
   const email = String(formData.get("email") ?? "").trim();
   const next = String(formData.get("next") ?? "/");
+  await rememberReferral(formData);
+  await rememberInvite(formData);
   await signIn("email", { email, redirectTo: next });
 }
 
 export async function signInWithGoogle(formData: FormData) {
+  await rememberReferral(formData);
+  await rememberInvite(formData);
   await signIn("google", { redirectTo: String(formData.get("next") ?? "/") });
+}
+
+export async function signInWithGitHub(formData: FormData) {
+  await rememberReferral(formData);
+  await rememberInvite(formData);
+  await signIn("github", { redirectTo: String(formData.get("next") ?? "/") });
 }
 
 export async function signOutAction() {
@@ -75,6 +103,22 @@ export async function shareSettingsAction(brandId: string, input: { hiddenFields
 
 export async function createSharePageAction(brandId: string) {
   return wrap(async () => createSharePage(await requireCtx(), brandId));
+}
+
+// ---------- Invites ----------
+
+export async function getInviteAction(brandId: string) {
+  return wrap(async () => getOrCreateInvite(await requireCtx(), brandId));
+}
+
+export async function resetInviteAction(brandId: string) {
+  return wrap(async () => resetInvite(await requireCtx(), brandId));
+}
+
+export async function acceptInviteAction(token: string) {
+  const ctx = await requireCtx(`/join/${token}`);
+  const { brandId } = await acceptInvite(ctx, token);
+  redirect(`/brands/${brandId}`);
 }
 
 // ---------- Jobs (founder) ----------
@@ -110,6 +154,14 @@ export async function applyProposedEditAction(messageId: string, index: number) 
   return wrap(async () => (await applyProposedEdit(await requireCtx(), messageId, index)).id);
 }
 
+// ---------- Beta (operator) ----------
+
+export async function approveWaitlistAction(formData: FormData) {
+  const ctx = await requireCtx();
+  await approveWaitlist(ctx, String(formData.get("email") ?? ""));
+  revalidatePath("/ops/waitlist");
+}
+
 // ---------- Jobs (operator) ----------
 
 export async function claimJobAction(jobId: string) {
@@ -131,5 +183,10 @@ export async function failJobAction(jobId: string, reason: string) {
 // ---------- Public share page ----------
 
 export async function submitFeedbackAction(slug: string, input: z.infer<typeof feedbackInputSchema>) {
-  return wrap(async () => submitFeedback(slug, input));
+  return wrap(async () => {
+    const h = await headers();
+    const ip = h.get("x-forwarded-for")?.split(",")[0]?.trim() || h.get("x-real-ip");
+    const ctx = await getCtx();
+    return submitFeedback(slug, input, { ip, userId: ctx?.userId });
+  });
 }

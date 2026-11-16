@@ -1,19 +1,23 @@
 "use client";
 
-import { useState, useTransition } from "react";
-import { createSharePageAction, editBriefFieldAction, shareSettingsAction } from "@/app/actions";
+import { useEffect, useState, useTransition } from "react";
+import { editBriefFieldAction, shareSettingsAction } from "@/app/actions";
 import { BRIEF_FIELDS, BRIEF_LABELS, formatValue, isFilled, type BriefFieldKey } from "@/lib/brief";
 import type { BrandState } from "@/lib/services/brand-state";
 import type { NextStep } from "@/lib/types";
 import { DEFAULT_NEXT_STEPS } from "@/lib/types";
+import { timeAgo } from "./format";
 import { NextStepCard } from "./next-step-card";
 
-const LIST_FIELDS: BriefFieldKey[] = ["channels", "nameDirections", "openQuestions"];
-const SHAREABLE = BRIEF_FIELDS.filter((k) => k !== "openQuestions");
+const LIST_FIELDS: BriefFieldKey[] = ["competitors", "channels", "nameDirections", "openQuestions"];
+const SHAREABLE = BRIEF_FIELDS.filter((k) => k !== "openQuestions" && k !== "goals");
+// Short fields that sit side by side, as in the mockup.
+const PAIRED: BriefFieldKey[] = ["price", "channels"];
 
 /** Brief field: small grey label over value. Pending fields show "Asking now…". Click to edit. */
 function BriefField(props: {
   brandId: string;
+  brandName: string;
   field: BriefFieldKey;
   value: unknown;
   asking: boolean;
@@ -36,80 +40,80 @@ function BriefField(props: {
     });
 
   return (
-    <div key={props.flashKey} className={`-mx-2 rounded-lg px-2 py-2 ${props.flashKey ? "brief-flash" : ""}`}>
-      <div className="flex items-baseline justify-between gap-2">
-        <p className="text-[12px] text-ink-3">{BRIEF_LABELS[props.field]}</p>
+    <div key={props.flashKey} className={`group -mx-2 min-w-0 flex-1 rounded-lg px-2 py-1 ${props.flashKey ? "brief-flash" : ""}`}>
+      <dt className="mb-1 flex items-baseline justify-between gap-2 text-[12px] text-ink-3">
+        {BRIEF_LABELS[props.field]}
         {!editing && (
           <button
             onClick={() => {
               setDraft(isList ? ((props.value as string[]) ?? []).join("\n") : formatValue(props.value));
               setEditing(true);
             }}
-            className="text-[12px] text-ink-3 hover:text-accent"
+            className="text-[12px] text-ink-3 opacity-0 group-hover:opacity-100 hover:text-accent-text focus-visible:opacity-100"
             aria-label={`Edit ${BRIEF_LABELS[props.field]}`}
           >
             Edit
           </button>
         )}
-      </div>
-      {editing ? (
-        <div className="mt-1 space-y-2">
-          <textarea
-            autoFocus
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            rows={isList ? 3 : 2}
-            placeholder={isList ? "One per line" : ""}
-            className="w-full resize-y rounded-lg border border-line px-2.5 py-1.5 outline-none focus:border-accent"
-          />
-          <div className="flex gap-2">
-            <button onClick={save} disabled={pending} className="h-7 rounded-md bg-accent px-2.5 text-[12px] font-medium text-white disabled:opacity-60">
-              Save
-            </button>
-            <button onClick={() => setEditing(false)} className="h-7 rounded-md px-2.5 text-[12px] text-ink-2 hover:bg-subtle">
-              Cancel
-            </button>
+      </dt>
+      <dd className="m-0">
+        {editing ? (
+          <div className="space-y-2">
+            <textarea
+              autoFocus
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              rows={isList ? 3 : 2}
+              placeholder={isList ? "One per line" : ""}
+              className="w-full resize-y rounded-lg border border-line-strong bg-bg px-2.5 py-1.5 outline-none focus:border-focus"
+            />
+            <div className="flex gap-2">
+              <button onClick={save} disabled={pending} className="h-7 rounded-full bg-accent px-2.5 text-[12px] font-medium text-accent-ink disabled:opacity-60">
+                Save
+              </button>
+              <button onClick={() => setEditing(false)} className="h-7 rounded-md px-2.5 text-[12px] text-ink-2 hover:bg-subtle">
+                Cancel
+              </button>
+            </div>
+            {error && <p className="text-[12px] text-danger">{error}</p>}
           </div>
-          {error && <p className="text-[12px] text-danger">{error}</p>}
-        </div>
-      ) : props.asking && !filled ? (
-        <p className="text-ink-3 italic">Asking now…</p>
-      ) : !filled ? (
-        <p className="text-ink-3">—</p>
-      ) : isList ? (
-        <ul className="mt-0.5 space-y-0.5">
-          {(props.value as string[]).map((v, i) => (
-            <li key={i}>{v}</li>
-          ))}
-        </ul>
-      ) : (
-        <p className="mt-0.5 leading-snug">{formatValue(props.value)}</p>
-      )}
+        ) : props.asking && !filled ? (
+          <span className="text-ink-3 italic">Asking now…</span>
+        ) : !filled ? (
+          <span className="text-ink-3">Not set</span>
+        ) : props.field === "nameDirections" ? (
+          <ul className="mt-0.5 flex flex-wrap gap-1.5">
+            {(props.value as string[]).map((v, i) => {
+              const current = v.trim().toLowerCase() === props.brandName.trim().toLowerCase();
+              return (
+                <li key={i} className={`rounded-full border px-2.5 py-1 ${current ? "border-ink font-medium" : "border-line-strong"}`}>
+                  {v}
+                </li>
+              );
+            })}
+          </ul>
+        ) : isList ? (
+          <ul className="space-y-0.5">
+            {(props.value as string[]).map((v, i) => (
+              <li key={i}>{v}</li>
+            ))}
+          </ul>
+        ) : props.field === "oneLiner" ? (
+          <p className="text-[15px] leading-[1.4] font-medium">{formatValue(props.value)}</p>
+        ) : (
+          <p>{formatValue(props.value)}</p>
+        )}
+      </dd>
     </div>
   );
 }
 
+/** Published share page: link, response counts, and which fields the page shows. */
 function FeedbackBlock({ state }: { state: BrandState }) {
   const fb = state.feedback;
   const [pending, start] = useTransition();
   const [copied, setCopied] = useState(false);
   const hidden = state.brand.shareHiddenFields;
-
-  if (!fb.published) {
-    return (
-      <section className="rounded-xl border border-line p-3.5">
-        <p className="font-medium">Feedback page</p>
-        <p className="mt-0.5 text-[13px] text-ink-2">Publish a page from this brief that asks people if they would buy it.</p>
-        <button
-          disabled={pending}
-          onClick={() => start(async () => void (await createSharePageAction(state.brand.id)))}
-          className="mt-3 h-8 rounded-lg border border-line px-3 text-[13px] font-medium hover:bg-subtle disabled:opacity-60"
-        >
-          Publish feedback page
-        </button>
-      </section>
-    );
-  }
 
   const bars: { key: "yes" | "maybe" | "no"; label: string }[] = [
     { key: "yes", label: "Would buy" },
@@ -119,7 +123,7 @@ function FeedbackBlock({ state }: { state: BrandState }) {
   const max = Math.max(1, ...Object.values(fb.counts));
 
   return (
-    <section className="rounded-xl border border-line p-3.5">
+    <section className="rounded-xl border border-line bg-bg p-3.5">
       <div className="flex items-baseline justify-between gap-2">
         <p className="font-medium">Feedback</p>
         <p className="font-mono text-[11px] text-ink-3">{fb.total} responses</p>
@@ -132,7 +136,7 @@ function FeedbackBlock({ state }: { state: BrandState }) {
             setCopied(true);
             setTimeout(() => setCopied(false), 1500);
           }}
-          className="shrink-0 text-[12px] font-medium text-accent"
+          className="shrink-0 text-[12px] font-medium text-accent-text"
         >
           {copied ? "Copied" : "Copy"}
         </button>
@@ -169,7 +173,7 @@ function FeedbackBlock({ state }: { state: BrandState }) {
               <label className="flex items-center gap-2 text-[13px]">
                 <input
                   type="checkbox"
-                  className="accent-[var(--accent)]"
+                  className="accent-[var(--focus)]"
                   checked={!hidden.includes(k)}
                   disabled={pending}
                   onChange={(e) =>
@@ -201,33 +205,65 @@ export function BriefTab({
   busy: boolean;
 }) {
   const { brief } = state;
+  const [showEmpty, setShowEmpty] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(t);
+  }, []);
+
+  // Like the mockup, the brief shows what's known or being asked; empty fields are one click away.
+  const visible = (k: BriefFieldKey) => showEmpty || isFilled(brief.fields[k]) || brief.pending.includes(k);
+  const hiddenCount = BRIEF_FIELDS.filter((k) => !visible(k)).length;
+  const field = (k: BriefFieldKey) => (
+    <BriefField
+      key={k}
+      brandId={state.brand.id}
+      brandName={state.brand.name}
+      field={k}
+      value={brief.fields[k]}
+      asking={brief.pending.includes(k)}
+      flashKey={flash.keys.includes(k) ? flash.at : 0}
+    />
+  );
+
   return (
-    <div className="space-y-5">
-      <div className="flex items-baseline justify-between">
-        <p className="text-[13px] text-ink-2">{brief.usable ? "Usable brief" : "Brief in progress"}</p>
-        <p className="font-mono text-[11px] text-ink-3">v{brief.version}</p>
+    <div className="flex flex-1 flex-col gap-[22px]">
+      <div className="flex items-baseline justify-between gap-3">
+        <h2 className="text-[15px] font-semibold">Brand brief</h2>
+        {brief.version > 0 && (
+          <span className="font-mono text-[11px] text-ink-3">
+            v{brief.version}
+            {brief.updatedAt ? ` · updated ${timeAgo(brief.updatedAt, now)}` : ""}
+          </span>
+        )}
       </div>
-      <div className="space-y-1">
-        {BRIEF_FIELDS.map((k) => (
-          <BriefField
-            key={k}
-            brandId={state.brand.id}
-            field={k}
-            value={brief.fields[k]}
-            asking={brief.pending.includes(k)}
-            flashKey={flash.keys.includes(k) ? flash.at : 0}
-          />
-        ))}
-      </div>
+
+      {brief.version === 0 && !showEmpty ? (
+        <p className="text-ink-3">The brief fills in here as you talk: one-liner, customer, positioning, price and more.</p>
+      ) : (
+        <dl className="m-0 flex flex-col gap-3">
+          {BRIEF_FIELDS.filter((k) => !PAIRED.includes(k) && visible(k) && BRIEF_FIELDS.indexOf(k) < BRIEF_FIELDS.indexOf("price")).map(field)}
+          {PAIRED.some(visible) && <div className="flex gap-4">{PAIRED.filter(visible).map(field)}</div>}
+          {BRIEF_FIELDS.filter((k) => !PAIRED.includes(k) && visible(k) && BRIEF_FIELDS.indexOf(k) > BRIEF_FIELDS.indexOf("price")).map(field)}
+        </dl>
+      )}
+      {hiddenCount > 0 && (
+        <button onClick={() => setShowEmpty(true)} className="-mt-2 self-start text-[12px] text-ink-3 hover:text-accent-text">
+          Show empty fields ({hiddenCount})
+        </button>
+      )}
+
+      {state.feedback.published && <FeedbackBlock state={state} />}
+
       {brief.usable && (
-        <section className="space-y-2">
-          <p className="text-[13px] text-ink-2">Next steps</p>
+        <section className="mt-auto flex flex-col gap-2">
+          <p className="text-[12px] text-ink-3">Next steps</p>
           {DEFAULT_NEXT_STEPS.map((s) => (
             <NextStepCard key={s.kind} step={s} onPick={onNextStep} disabled={busy} />
           ))}
         </section>
       )}
-      <FeedbackBlock state={state} />
     </div>
   );
 }

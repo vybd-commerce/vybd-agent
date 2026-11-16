@@ -12,7 +12,7 @@ function JobIcon({ status }: { status: JobView["status"] }) {
     <span
       aria-hidden
       className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
-        done ? "bg-accent text-white" : bad ? "bg-subtle text-danger" : "bg-accent-soft text-accent"
+        done ? "bg-accent text-accent-ink" : bad ? "bg-subtle text-danger" : "bg-accent-soft text-accent-text"
       }`}
     >
       {done ? (
@@ -39,7 +39,7 @@ export function JobStatusCard({ job, onView }: { job: JobView; onView: (id: stri
         <p className="font-medium">{job.title}</p>
         <p className="font-mono text-[11px] text-ink-3">{jobStatusLine(job)}</p>
       </div>
-      <button onClick={() => onView(job.id)} className="text-[13px] font-medium text-accent hover:underline">
+      <button onClick={() => onView(job.id)} className="text-[13px] font-medium text-accent-text hover:underline">
         View
       </button>
     </div>
@@ -65,7 +65,7 @@ export function QuoteCard({ job, onEditSpec }: { job: JobView; onEditSpec: (id: 
     return (
       <div className="flex items-center justify-between rounded-xl border border-dashed border-line px-3 py-2.5 text-[13px] text-ink-2">
         <span>{job.title} quote saved for later.</span>
-        <button className="font-medium text-accent hover:underline" onClick={() => setDismissed(false)}>
+        <button className="font-medium text-accent-text hover:underline" onClick={() => setDismissed(false)}>
           Show quote
         </button>
       </div>
@@ -99,7 +99,7 @@ export function QuoteCard({ job, onEditSpec }: { job: JobView; onEditSpec: (id: 
         <button
           onClick={approve}
           disabled={pending}
-          className="h-8 rounded-lg bg-accent px-3 text-[13px] font-medium text-white hover:opacity-90 disabled:opacity-60"
+          className="h-8 rounded-full bg-accent px-3 text-[13px] font-medium text-accent-ink hover:bg-accent-hover disabled:opacity-60"
         >
           {pending ? "Starting…" : awaitingPayment ? "Continue to payment" : "Approve & start"}
         </button>

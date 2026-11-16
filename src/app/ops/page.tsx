@@ -31,7 +31,7 @@ export default async function OpsQueue({ searchParams }: PageProps<"/ops">) {
 
   return (
     <div>
-      <h1 className="text-[20px] font-semibold tracking-[-0.01em]">Jobs</h1>
+      <h1 className="text-[24px] font-display font-normal tracking-[-0.015em]">Jobs</h1>
       <nav className="mt-4 flex flex-wrap gap-1" aria-label="Filter jobs">
         {FILTERS.map((f) => (
           <Link
@@ -63,7 +63,7 @@ export default async function OpsQueue({ searchParams }: PageProps<"/ops">) {
               {jobs.map((j) => (
                 <tr key={j.id} className="border-b border-line">
                   <td className="py-2.5">
-                    <Link href={`/ops/jobs/${j.id}`} className="font-medium text-accent hover:underline">
+                    <Link href={`/ops/jobs/${j.id}`} className="font-medium text-accent-text hover:underline">
                       {j.title}
                     </Link>
                   </td>

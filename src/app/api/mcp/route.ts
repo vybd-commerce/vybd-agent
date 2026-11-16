@@ -3,6 +3,7 @@ import { createMcpServer } from "@/lib/mcp/server";
 import { appUrl } from "@/lib/stripe";
 import { verifyAccessToken } from "@/lib/oauth";
 import { ctxForUser } from "@/lib/services/context";
+import { rateLimit, tooManyRequests } from "@/lib/rate-limit";
 
 export const maxDuration = 300;
 
@@ -29,6 +30,8 @@ async function handle(req: Request) {
   if (!token) return unauthorized();
   const ctx = await ctxForUser(token.userId).catch(() => null);
   if (!ctx) return unauthorized();
+  const limit = await rateLimit(`mcp:${token.userId}`, 120, 60);
+  if (!limit.ok) return tooManyRequests(limit.retryAfter, cors);
 
   const server = createMcpServer(ctx);
   const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });

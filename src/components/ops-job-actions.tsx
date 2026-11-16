@@ -25,7 +25,7 @@ function coerce(field: DeliveryField, raw: string) {
 }
 
 function Input({ field, value, onChange }: { field: DeliveryField; value: string; onChange: (v: string) => void }) {
-  const cls = "w-full rounded-lg border border-line px-2.5 py-1.5 outline-none focus:border-accent";
+  const cls = "w-full rounded-lg border border-line px-2.5 py-1.5 outline-none focus:border-focus";
   return (
     <label className="block">
       <span className="mb-1 block text-[12px] text-ink-3">{field.label}</span>
@@ -81,12 +81,12 @@ function DeliverForm({ job, form }: { job: JobView; form: DeliveryForm }) {
     <section className="space-y-4">
       <div className="flex items-baseline justify-between">
         <h2 className="text-[15px] font-semibold">Deliver</h2>
-        <button className="text-[12px] text-accent" onClick={() => setJson(json === null ? JSON.stringify(build(), null, 2) : null)}>
+        <button className="text-[12px] text-accent-text" onClick={() => setJson(json === null ? JSON.stringify(build(), null, 2) : null)}>
           {json === null ? "Edit as JSON" : "Back to form"}
         </button>
       </div>
       {json !== null ? (
-        <textarea value={json} onChange={(e) => setJson(e.target.value)} rows={18} className="w-full rounded-lg border border-line p-2.5 font-mono text-[12px] outline-none focus:border-accent" />
+        <textarea value={json} onChange={(e) => setJson(e.target.value)} rows={18} className="w-full rounded-lg border border-line p-2.5 font-mono text-[12px] outline-none focus:border-focus" />
       ) : (
         <>
           <p className="text-[13px] text-ink-2">
@@ -128,7 +128,7 @@ function DeliverForm({ job, form }: { job: JobView; form: DeliveryForm }) {
         </>
       )}
       {error && <pre className="rounded-lg bg-subtle p-2 text-[12px] whitespace-pre-wrap text-danger">{error}</pre>}
-      <button onClick={submit} disabled={pending} className="h-9 rounded-lg bg-accent px-4 font-medium text-white disabled:opacity-60">
+      <button onClick={submit} disabled={pending} className="h-9 rounded-full bg-accent px-4 font-medium text-accent-ink disabled:opacity-60">
         {pending ? "Delivering…" : "Deliver to founder"}
       </button>
     </section>
@@ -152,10 +152,10 @@ export function OpsJobActions({ job, isMine, deliveryForm, steps }: { job: JobVi
     <>
       {error && <p className="rounded-lg bg-subtle px-3 py-2 text-[13px] text-danger">{error}</p>}
       {!job.operatorId && workable && (
-        <section className="rounded-xl border border-accent bg-accent-soft p-4">
+        <section className="rounded-xl border border-focus bg-accent-soft p-4">
           <p className="font-medium">Unclaimed</p>
           <p className="text-[13px] text-ink-2">Claim it to tell the founder an operator is assigned.</p>
-          <button onClick={() => run(() => claimJobAction(job.id))} disabled={pending} className="mt-3 h-8 rounded-lg bg-accent px-3 text-[13px] font-medium text-white disabled:opacity-60">
+          <button onClick={() => run(() => claimJobAction(job.id))} disabled={pending} className="mt-3 h-8 rounded-full bg-accent px-3 text-[13px] font-medium text-accent-ink disabled:opacity-60">
             Claim job
           </button>
         </section>
@@ -187,7 +187,7 @@ export function OpsJobActions({ job, isMine, deliveryForm, steps }: { job: JobVi
                   </option>
                 ))}
             </select>
-            <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Contacted 8 manufacturers, 5 replied" aria-label="Update" className="h-9 min-w-0 flex-1 rounded-lg border border-line px-3 outline-none focus:border-accent" />
+            <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Contacted 8 manufacturers, 5 replied" aria-label="Update" className="h-9 min-w-0 flex-1 rounded-lg border border-line px-3 outline-none focus:border-focus" />
             <button disabled={pending} className="h-9 rounded-lg border border-line px-3 text-[13px] font-medium hover:bg-subtle">
               Post
             </button>

@@ -60,13 +60,13 @@ function SpecEditor({ job, onDone }: { job: JobView; onDone: () => void }) {
             value={draft[k]}
             rows={isList(k) ? 3 : 1}
             onChange={(e) => setDraft((d) => ({ ...d, [k]: e.target.value }))}
-            className="w-full resize-y rounded-lg border border-line px-2.5 py-1.5 outline-none focus:border-accent"
+            className="w-full resize-y rounded-lg border border-line px-2.5 py-1.5 outline-none focus:border-focus"
           />
         </label>
       ))}
       {error && <p className="text-[13px] text-danger">{error}</p>}
       <div className="flex gap-2">
-        <button onClick={save} disabled={pending} className="h-8 rounded-lg bg-accent px-3 text-[13px] font-medium text-white disabled:opacity-60">
+        <button onClick={save} disabled={pending} className="h-8 rounded-full bg-accent px-3 text-[13px] font-medium text-accent-ink disabled:opacity-60">
           Save spec
         </button>
         <button onClick={onDone} className="h-8 rounded-lg px-3 text-[13px] text-ink-2 hover:bg-subtle">
@@ -87,7 +87,7 @@ function SuppliersResultView({ result }: { result: SuppliersResult }) {
             <div className="flex items-baseline justify-between gap-2">
               <p className="font-medium">
                 {s.url ? (
-                  <a href={s.url} target="_blank" rel="noreferrer" className="hover:text-accent hover:underline">
+                  <a href={s.url} target="_blank" rel="noreferrer" className="hover:text-accent-text hover:underline">
                     {s.name}
                   </a>
                 ) : (
@@ -160,7 +160,7 @@ export function JobThread({ job, asOperator }: { job: JobView; asOperator?: bool
           onChange={(e) => setText(e.target.value)}
           placeholder={asOperator ? "Ask the founder something" : "Ask a question about this job"}
           aria-label="Message"
-          className="h-9 min-w-0 flex-1 rounded-lg border border-line px-3 outline-none focus:border-accent"
+          className="h-9 min-w-0 flex-1 rounded-lg border border-line px-3 outline-none focus:border-focus"
         />
         <button disabled={pending || !text.trim()} className="h-9 rounded-lg border border-line px-3 text-[13px] font-medium hover:bg-subtle disabled:opacity-50">
           Send
@@ -215,7 +215,7 @@ function JobDetail({
         <div className="mb-2 flex items-baseline justify-between">
           <p className="text-[12px] text-ink-3">Spec</p>
           {job.status === "quoted" && !editingSpec && (
-            <button onClick={() => setEditingSpec(true)} className="text-[12px] text-accent">
+            <button onClick={() => setEditingSpec(true)} className="text-[12px] text-accent-text">
               Edit spec
             </button>
           )}
@@ -228,6 +228,14 @@ function JobDetail({
           <p className="mb-2 text-[12px] text-ink-3">Progress</p>
           <ProgressList steps={job.steps} reached={job.reachedStep} finished={finished} notes={notes} />
           {!finished && latestNote && <p className="mt-2 text-[13px] text-ink-3">Latest: {String(latestNote.payload.note)}</p>}
+          {job.awaitingHost && (
+            <p className="mt-3 rounded-lg bg-accent-soft px-3 py-2 text-[13px] text-accent-text">
+              This runs in your own assistant. In Claude or Codex, say “run my {job.title.toLowerCase()}”.{" "}
+              <a href="/connect" className="font-medium underline">
+                Connect Vybd
+              </a>
+            </p>
+          )}
         </section>
       )}
 
@@ -237,9 +245,13 @@ function JobDetail({
           {job.type === "find_suppliers" ? (
             <SuppliersResultView result={job.result as unknown as SuppliersResult} />
           ) : job.type === "market_snapshot" ? (
-            <button onClick={onOpenSnapshot} className="text-accent hover:underline">
+            <button onClick={onOpenSnapshot} className="text-accent-text hover:underline">
               Open the snapshot
             </button>
+          ) : job.type === "brand_research" ? (
+            <div className="max-h-[60vh] overflow-y-auto rounded-[12px] border border-line p-3 text-[13px] whitespace-pre-wrap">
+              {String(job.result.reportMd ?? "")}
+            </div>
           ) : (
             <pre className="overflow-x-auto rounded-lg bg-subtle p-2 text-[12px]">{JSON.stringify(job.result, null, 2)}</pre>
           )}
@@ -247,7 +259,7 @@ function JobDetail({
             <button
               disabled={pending}
               onClick={() => start(async () => void (await acceptJobAction(job.id)))}
-              className="mt-3 h-8 rounded-lg bg-accent px-3 text-[13px] font-medium text-white disabled:opacity-60"
+              className="mt-3 h-8 rounded-full bg-accent px-3 text-[13px] font-medium text-accent-ink disabled:opacity-60"
             >
               Accept delivery
             </button>

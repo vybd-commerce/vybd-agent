@@ -9,7 +9,8 @@ export default async function AppLayout({ children }: LayoutProps<"/">) {
   return (
     <div className="flex h-full flex-col md:flex-row">
       <Sidebar
-        brands={brands.map((b) => ({ id: b.id, name: b.name, stage: b.stage }))}
+        brands={brands.map((b) => ({ id: b.id, name: b.name, stage: b.stage, shared: b.ownerId !== ctx.userId }))}
+        name={session?.user?.name ?? ""}
         email={session?.user?.email ?? ""}
         isOperator={ctx.role === "operator"}
       />

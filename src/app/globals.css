@@ -1,47 +1,76 @@
 @import "tailwindcss";
 
 :root {
+  /* Vybd design system: white canvas, navy ink, one mint accent (fill only). */
   --bg: #ffffff;
-  --ink: #16181d;
-  --ink-2: #4b5060;
-  --ink-3: #8a90a0;
-  --line: #e8e9ee;
-  --subtle: #f4f5f7;
-  --accent: #3046c5;
-  --accent-ink: #ffffff;
-  --accent-soft: #eef0fb;
+  --ink: #0f1b33;
+  --body: #111827;
+  --ink-2: #5b6270;
+  --ink-3: #6b7280;
+  --line: #e7e9ed;
+  --line-strong: #e7e9ed;
+  --divider: #e7e9ed;
+  --subtle: #f3f4f6;
+  --sidebar: #f3f4f6;
+  --selected: #e7e9ed;
+  --tab: #f3f4f6;
+  --panel: #ffffff;
+  --accent: #1bb59b;
+  --accent-hover: #17a088;
+  /* Mint is 2.5:1 on white: labels on mint are dark, accent text on white is navy. */
+  --accent-ink: #111827;
+  --accent-text: #0f1b33;
+  --accent-soft: #e8f7f3;
+  /* mint-deep, 3.4:1 on white: focus rings and accent borders. */
+  --focus: #13987f;
   --danger: #b42318;
-  --ok: #1d7a4f;
+  --ok: #1f8f4e;
 }
 
 @theme inline {
   --color-bg: var(--bg);
   --color-ink: var(--ink);
+  --color-body: var(--body);
   --color-ink-2: var(--ink-2);
   --color-ink-3: var(--ink-3);
   --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-divider: var(--divider);
   --color-subtle: var(--subtle);
+  --color-sidebar: var(--sidebar);
+  --color-selected: var(--selected);
+  --color-tab: var(--tab);
+  --color-panel: var(--panel);
   --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-ink: var(--accent-ink);
+  --color-accent-text: var(--accent-text);
   --color-accent-soft: var(--accent-soft);
+  --color-focus: var(--focus);
   --color-danger: var(--danger);
   --color-ok: var(--ok);
-  --font-sans: var(--font-geist-sans);
+  --font-sans: var(--font-dm-sans);
+  --font-display: var(--font-instrument-serif);
   --font-mono: var(--font-geist-mono);
 }
 
 html,
 body {
   background: var(--bg);
-  color: var(--ink);
-  font-family: var(--font-geist-sans), system-ui, sans-serif;
+  color: var(--body);
+  font-family: var(--font-dm-sans), -apple-system, system-ui, sans-serif;
   font-size: 14px;
+  line-height: 1.5;
   -webkit-font-smoothing: antialiased;
 }
 
 /* In the base layer so utilities (e.g. focus-visible:outline-none) can override it. */
 @layer base {
+  a:hover {
+    color: var(--accent-text);
+  }
   :focus-visible {
-    outline: 2px solid var(--accent);
+    outline: 2px solid var(--focus);
     outline-offset: 2px;
   }
 }

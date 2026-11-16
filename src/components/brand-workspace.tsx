@@ -5,11 +5,15 @@ import { useCallback, useRef, useState, useTransition } from "react";
 import { renameBrandAction } from "@/app/actions";
 import type { ChatEvent } from "@/lib/agent/orchestrator";
 import type { BrandState } from "@/lib/services/brand-state";
+import { AUTOPILOT_HOURS, type AutopilotView } from "@/lib/autopilot";
 import type { NextStep } from "@/lib/types";
 import { BriefTab } from "./brief-tab";
 import { Composer, MessageList, toolActivity, type StreamingReply } from "./conversation";
 import { JobsTab } from "./jobs-tab";
 import { NEXT_STEP_PROMPTS } from "./next-step-card";
+import { AutopilotBanner, AutopilotSheet } from "./autopilot";
+import { ScoreCard } from "./score-card";
+import { ShareSheet, type ShareMode } from "./share-sheet";
 import { SnapshotTab } from "./snapshot-tab";
 import { StageStepper } from "./stage-stepper";
 import { useBrandState } from "./use-brand-state";
@@ -24,6 +28,43 @@ const STARTERS = [
   "Protein snacks for kids who refuse breakfast",
   "Minimal travel gear for people who only carry on",
 ];
+
+function ShareIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7M16 6l-4-4-4 4M12 2v13" />
+    </svg>
+  );
+}
+
+function InviteIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8M19 8v6M22 11h-6" />
+    </svg>
+  );
+}
+
+function MemberStack({ members }: { members: BrandState["members"] }) {
+  if (members.length < 2) return null;
+  return (
+    <div className="hidden -space-x-1.5 sm:flex" aria-label={`${members.length} people on the team`}>
+      {members.slice(0, 4).map((m) =>
+        m.image ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img key={m.userId} src={m.image} alt={m.name} title={m.name} className="h-7 w-7 rounded-full border-2 border-bg object-cover" />
+        ) : (
+          <span key={m.userId} title={m.name} className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-bg bg-subtle text-[11px] font-semibold text-ink-2">
+            {m.name.slice(0, 1).toUpperCase()}
+          </span>
+        ),
+      )}
+      {members.length > 4 && (
+        <span className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-bg bg-subtle text-[11px] text-ink-2">+{members.length - 4}</span>
+      )}
+    </div>
+  );
+}
 
 function BrandName({ id, name }: { id: string; name: string }) {
   const [editing, setEditing] = useState(false);
@@ -52,10 +93,10 @@ function BrandName({ id, name }: { id: string; name: string }) {
           setEditing(false);
         }
       }}
-      className="w-full max-w-[260px] rounded-md border border-accent px-1.5 text-[15px] font-semibold outline-none"
+      className="w-full max-w-[260px] rounded-md border border-focus px-1.5 text-[16px] font-semibold outline-none"
     />
   ) : (
-    <button onClick={() => setEditing(true)} className="truncate text-[15px] font-semibold hover:text-accent" title="Rename">
+    <button onClick={() => setEditing(true)} className="truncate text-[16px] font-semibold hover:text-accent-text" title="Rename">
       {name}
     </button>
   );
@@ -67,6 +108,12 @@ export function BrandWorkspace({ initial }: { initial: BrandState }) {
   // Returning from checkout (?job=…) opens that job.
   const [tab, setTab] = useState<Tab>(() => (searchParams.get("job") ? "jobs" : "brief"));
   const [mobilePanel, setMobilePanel] = useState(false);
+  const [share, setShare] = useState<ShareMode | null>(null);
+  const [autopilotSheet, setAutopilotSheet] = useState(false);
+  // UI only: nothing runs or persists yet, so Start/Stop just switch what this tab shows.
+  const [localAutopilot, setLocalAutopilot] = useState<AutopilotView | null>(null);
+  const autopilot = localAutopilot ?? state.autopilot;
+  const openAutopilot = autopilot.status === "available" ? () => setAutopilotSheet(true) : undefined;
   const [selectedJob, setSelectedJob] = useState<string | null>(() => searchParams.get("job"));
   const [editingSpec, setEditingSpec] = useState(false);
   const [pendingUser, setPendingUser] = useState<string | null>(null);
@@ -166,7 +213,7 @@ export function BrandWorkspace({ initial }: { initial: BrandState }) {
     [brandId, busy, refresh],
   );
 
-  const onNextStep = useCallback((s: NextStep) => send(NEXT_STEP_PROMPTS[s.kind]), [send]);
+  const onNextStep = useCallback((s: NextStep) => (s.kind === "invite" ? setShare("invite") : send(NEXT_STEP_PROMPTS[s.kind])), [send]);
   const empty = state.messages.length === 0 && !pendingUser && !streaming;
   const hasBrief = state.brief.version > 0;
 
@@ -177,118 +224,161 @@ export function BrandWorkspace({ initial }: { initial: BrandState }) {
   ];
 
   return (
-    <div className="flex h-full min-h-0">
-      {/* Conversation */}
-      <section className={`${mobilePanel ? "hidden" : "flex"} min-w-0 flex-1 flex-col lg:flex`} aria-label="Conversation">
-        <header className="flex min-h-[57px] flex-wrap items-center gap-x-4 gap-y-2 border-b border-line px-4 py-2.5 md:px-6">
-          <div className="min-w-0 flex-1 basis-40">
-            <BrandName key={state.brand.name} id={brandId} name={state.brand.name} />
-          </div>
+    <div className="flex h-full min-h-0 flex-col">
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-divider px-4 py-3.5 md:px-6">
+        <div className="flex min-w-0 flex-wrap items-center gap-3.5">
+          <BrandName key={state.brand.name} id={brandId} name={state.brand.name} />
           <StageStepper stage={state.brand.stage} />
-          <div className="flex items-center gap-2">
-            {state.feedback.url ? (
-              <a href={state.feedback.url} target="_blank" rel="noreferrer" className="h-8 rounded-lg border border-line px-3 text-[13px] leading-8 font-medium hover:bg-subtle">
-                Share
-              </a>
-            ) : (
-              <button
-                disabled={busy}
-                onClick={() => send(NEXT_STEP_PROMPTS.share_page)}
-                className="h-8 rounded-lg border border-line px-3 text-[13px] font-medium hover:bg-subtle disabled:opacity-50"
-              >
-                Share
-              </button>
-            )}
-            <button onClick={() => setMobilePanel(true)} className="h-8 rounded-lg border border-line px-3 text-[13px] font-medium lg:hidden">
-              Brief
-            </button>
-          </div>
-        </header>
-        <div className="min-h-0 flex-1 overflow-y-auto">
-          <div className="mx-auto max-w-[640px] px-4 py-6 md:px-6">
-            {empty ? (
-              <div className="pt-[12vh]">
-                <div className="flex gap-3">
-                  <AgentAvatar />
-                  <div className="pt-0.5">
-                    <p className="text-[18px] leading-snug font-semibold tracking-[-0.01em]">
-                      {hasBrief ? "Pick up where you left off" : "What are you thinking of making?"}
-                    </p>
-                    <p className="mt-1.5 text-ink-2">
-                      {hasBrief
-                        ? "This brand already has a brief, maybe started from another app. Tell me what to work on next, or keep shaping it."
-                        : "Describe the idea in your own words, rough is fine. I'll ask a few questions and build the brief on the right as we go."}
-                    </p>
-                    <div className="mt-5 flex flex-wrap gap-1.5">
-                      {(hasBrief ? RESUME_STARTERS : STARTERS).map((s) => (
-                        <button key={s} onClick={() => send(s)} className="rounded-full border border-line px-3 py-1 text-[13px] hover:border-accent hover:text-accent">
-                          {s}
-                        </button>
-                      ))}
+        </div>
+        <div className="flex items-center gap-2">
+          <MemberStack members={state.members} />
+          <button
+            onClick={() => setShare("invite")}
+            className="flex min-h-9 items-center gap-1.5 rounded-full bg-accent px-3 text-[13px] font-medium text-accent-ink hover:bg-accent-hover"
+          >
+            <InviteIcon />
+            Invite
+          </button>
+          <button
+            onClick={() => setShare("feedback")}
+            className="flex min-h-9 items-center gap-1.5 rounded-lg border border-line-strong px-3 text-[13px] font-medium hover:text-accent-text"
+          >
+            <ShareIcon />
+            Share
+          </button>
+          <button onClick={() => setMobilePanel(true)} className="flex min-h-9 items-center gap-1.5 rounded-lg border border-line-strong px-3 text-[13px] font-medium lg:hidden">
+            Brief
+          </button>
+        </div>
+      </header>
+      <AutopilotBanner
+        autopilot={autopilot}
+        onStop={() => setLocalAutopilot({ status: "done" })}
+        onReview={() => document.querySelector("[data-autopilot-summary]")?.scrollIntoView({ behavior: "smooth", block: "center" })}
+      />
+      <div className="flex min-h-0 flex-1">
+        {/* Conversation */}
+        <section className={`${mobilePanel ? "hidden" : "flex"} min-w-0 flex-1 flex-col lg:flex`} aria-label="Conversation">
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            <div className="mx-auto max-w-[640px] px-4 pt-8 pb-4 md:px-6">
+              {empty ? (
+                <div className="pt-[12vh]">
+                  <div className="flex gap-3">
+                    <AgentAvatar />
+                    <div className="pt-0.5">
+                      <p className="text-[18px] leading-snug font-semibold tracking-[-0.01em]">
+                        {hasBrief ? "Pick up where you left off" : "What are you thinking of making?"}
+                      </p>
+                      <p className="mt-1.5 text-ink-2">
+                        {hasBrief
+                          ? "This brand already has a brief, maybe started from another app. Tell me what to work on next, or keep shaping it."
+                          : "Describe the idea in your own words, rough is fine. I'll ask a few questions and build the brief on the right as we go."}
+                      </p>
+                      <div className="mt-5 flex flex-wrap gap-2">
+                        {(hasBrief ? RESUME_STARTERS : STARTERS).map((s) => (
+                          <button key={s} onClick={() => send(s)} className="min-h-[34px] rounded-full border border-line-strong bg-bg px-3 text-[13px] hover:border-focus hover:text-accent-text">
+                            {s}
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   </div>
                 </div>
-              </div>
-            ) : (
-              <MessageList
-                messages={state.messages}
-                pendingUser={pendingUser}
-                streaming={streaming}
-                error={error}
+              ) : (
+                <MessageList
+                  messages={state.messages}
+                  members={state.members}
+                  viewerId={state.viewerId}
+                  onStartAutopilot={openAutopilot}
+                  pendingUser={pendingUser}
+                  streaming={streaming}
+                  error={error}
+                  jobs={state.jobs}
+                  busy={busy}
+                  onSend={send}
+                  onViewJob={viewJob}
+                  onEditSpec={editSpec}
+                />
+              )}
+            </div>
+          </div>
+          <div className="mx-auto w-full max-w-[640px] px-4 pb-6 md:px-6">
+            <Composer onSend={send} busy={busy} onStop={() => abort.current?.abort()} autoFocus={empty} />
+          </div>
+        </section>
+
+        {/* Brand panel */}
+        <aside
+          className={`${mobilePanel ? "flex" : "hidden"} min-h-0 w-full flex-col border-divider bg-panel lg:flex lg:w-[380px] lg:shrink-0 lg:border-l`}
+          aria-label="Brand panel"
+        >
+          <div className="flex items-center gap-1 px-6 pt-5" role="tablist">
+            <button onClick={() => setMobilePanel(false)} className="mr-1 text-[13px] text-ink-2 lg:hidden">
+              ‹ Chat
+            </button>
+            {tabs.map((t) => (
+              <button
+                key={t.key}
+                role="tab"
+                aria-selected={tab === t.key}
+                onClick={() => setTab(t.key)}
+                className={`rounded-lg px-2.5 py-1.5 text-[13px] ${tab === t.key ? "bg-tab font-medium text-ink" : "text-ink-3 hover:text-ink"}`}
+              >
+                {t.label}
+                {t.count ? <span className="ml-1.5 font-mono text-[11px] text-accent-text">{t.count}</span> : null}
+              </button>
+            ))}
+          </div>
+          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-6 pt-[22px] pb-7" role="tabpanel">
+            {tab === "brief" && (
+              <>
+                <ScoreCard
+                  score={state.score}
+                  autopilot={autopilot}
+                  onStartAutopilot={() => setAutopilotSheet(true)}
+                  busy={busy}
+                  onPrompt={send}
+                  onAction={(a) => setShare(a === "invite" ? "invite" : "feedback")}
+                />
+                <BriefTab state={state} flash={flash} onNextStep={onNextStep} busy={busy} />
+              </>
+            )}
+            {tab === "snapshot" && <SnapshotTab jobs={state.jobs} onNextStep={onNextStep} busy={busy} />}
+            {tab === "jobs" && (
+              <JobsTab
                 jobs={state.jobs}
-                busy={busy}
-                onSend={send}
-                onViewJob={viewJob}
-                onEditSpec={editSpec}
+                selectedId={selectedJob}
+                setSelectedId={(id) => {
+                  setSelectedJob(id);
+                  setEditingSpec(false);
+                }}
+                editingSpec={editingSpec}
+                setEditingSpec={setEditingSpec}
+                onOpenSnapshot={() => setTab("snapshot")}
               />
             )}
           </div>
-        </div>
-        <div className="mx-auto w-full max-w-[640px] px-4 pb-4 md:px-6">
-          <Composer onSend={send} busy={busy} onStop={() => abort.current?.abort()} autoFocus={empty} />
-        </div>
-      </section>
-
-      {/* Brand panel */}
-      <aside
-        className={`${mobilePanel ? "flex" : "hidden"} min-h-0 w-full flex-col border-line lg:flex lg:w-[380px] lg:shrink-0 lg:border-l`}
-        aria-label="Brand panel"
-      >
-        <div className="flex h-[57px] items-center gap-1 border-b border-line px-3" role="tablist">
-          <button onClick={() => setMobilePanel(false)} className="mr-1 text-[13px] text-ink-2 lg:hidden">
-            ‹ Chat
-          </button>
-          {tabs.map((t) => (
-            <button
-              key={t.key}
-              role="tab"
-              aria-selected={tab === t.key}
-              onClick={() => setTab(t.key)}
-              className={`h-8 rounded-lg px-3 text-[13px] font-medium ${tab === t.key ? "bg-subtle text-ink" : "text-ink-2 hover:text-ink"}`}
-            >
-              {t.label}
-              {t.count ? <span className="ml-1.5 font-mono text-[11px] text-accent">{t.count}</span> : null}
-            </button>
-          ))}
-        </div>
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5" role="tabpanel">
-          {tab === "brief" && <BriefTab state={state} flash={flash} onNextStep={onNextStep} busy={busy} />}
-          {tab === "snapshot" && <SnapshotTab jobs={state.jobs} onNextStep={onNextStep} busy={busy} />}
-          {tab === "jobs" && (
-            <JobsTab
-              jobs={state.jobs}
-              selectedId={selectedJob}
-              setSelectedId={(id) => {
-                setSelectedJob(id);
-                setEditingSpec(false);
-              }}
-              editingSpec={editingSpec}
-              setEditingSpec={setEditingSpec}
-              onOpenSnapshot={() => setTab("snapshot")}
-            />
-          )}
-        </div>
-      </aside>
+        </aside>
+      </div>
+      {autopilotSheet && (
+        <AutopilotSheet
+          brandName={state.brand.name}
+          onClose={() => setAutopilotSheet(false)}
+          onStart={() => {
+            const now = Date.now();
+            setLocalAutopilot({
+              status: "active",
+              startedAt: new Date(now).toISOString(),
+              endsAt: new Date(now + AUTOPILOT_HOURS * 3_600_000).toISOString(),
+              cyclesRun: 0,
+            });
+            setAutopilotSheet(false);
+          }}
+        />
+      )}
+      {share && (
+        <ShareSheet state={state} mode={share} onMode={setShare} onClose={() => setShare(null)} onChanged={refresh} />
+      )}
     </div>
   );
 }

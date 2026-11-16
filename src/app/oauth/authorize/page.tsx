@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { Wordmark } from "@/components/wordmark";
-import { getClient } from "@/lib/oauth";
+import { getClient, redirectUriAllowed } from "@/lib/oauth";
 import { allowAction, denyAction } from "./actions";
 
 type Params = Record<string, string | string[] | undefined>;
@@ -12,7 +12,7 @@ function ErrorScreen({ message }: { message: string }) {
     <main className="flex min-h-full items-center justify-center px-4 py-16">
       <div className="w-full max-w-[360px]">
         <Wordmark />
-        <h1 className="mt-8 text-[20px] font-semibold">Can’t connect</h1>
+        <h1 className="mt-8 text-[24px] font-display font-normal">Can’t connect</h1>
         <p className="mt-2 text-ink-2">{message}</p>
       </div>
     </main>
@@ -28,7 +28,7 @@ export default async function AuthorizePage({ searchParams }: PageProps<"/oauth/
   const client = clientId ? await getClient(clientId) : null;
 
   if (!client) return <ErrorScreen message="This app isn’t registered with Vybd. Try adding the connector again." />;
-  if (!client.redirectUris.includes(redirectUri)) return <ErrorScreen message="The app sent an unexpected return address." />;
+  if (!redirectUriAllowed(client.redirectUris, redirectUri)) return <ErrorScreen message="The app sent an unexpected return address." />;
   if (str(p.response_type) !== "code" || !challenge || str(p.code_challenge_method) !== "S256") {
     return <ErrorScreen message="The app sent an incomplete sign-in request (PKCE S256 is required)." />;
   }
@@ -42,7 +42,7 @@ export default async function AuthorizePage({ searchParams }: PageProps<"/oauth/
     <main className="flex min-h-full items-center justify-center px-4 py-16">
       <div className="w-full max-w-[380px]">
         <Wordmark />
-        <h1 className="mt-8 text-[20px] font-semibold tracking-[-0.01em]">Connect {name} to Vybd</h1>
+        <h1 className="mt-8 text-[24px] font-display font-normal tracking-[-0.015em]">Connect {name} to Vybd</h1>
         <p className="mt-2 text-ink-2">
           {name} will be able to read and update your brands and briefs, quote jobs, and send you checkout links for paid work. It can’t pay for anything.
         </p>
@@ -50,7 +50,7 @@ export default async function AuthorizePage({ searchParams }: PageProps<"/oauth/
         <div className="mt-6 flex gap-2">
           <form action={allowAction} className="flex-1">
             <input type="hidden" name="query" value={query} />
-            <button className="h-10 w-full rounded-lg bg-accent font-medium text-white">Allow</button>
+            <button className="h-10 w-full rounded-full bg-accent font-medium text-accent-ink">Allow</button>
           </form>
           <form action={denyAction}>
             <input type="hidden" name="query" value={query} />
