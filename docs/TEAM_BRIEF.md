@@ -135,8 +135,8 @@ Checks before every pull request: `pnpm typecheck && pnpm lint && pnpm test`.
 ## 9. Where to start, by background
 
 **Product**
-1. Open the four mockups in `vybd-agent-handoff/` (`1-shape-the-brand` to `4-build-together`).
-2. Read `vybd-agent-handoff/SPEC.md` and `docs/collaboration-user-stories.md`.
+1. Open the four mockups in the private [vybd-product](https://github.com/vybd-commerce/vybd-product) repo (`mockups/1-shape-the-brand` to `4-build-together`).
+2. Read `SPEC.md` in vybd-product, and `docs/collaboration-user-stories.md` here.
 3. Read https://www.vybd.ai/ecosystem; it is the promise the ecosystem work must keep.
 4. On the board, read every P0 "Done when" list. Those are the acceptance tests. Challenge any that do not match what a user needs.
 

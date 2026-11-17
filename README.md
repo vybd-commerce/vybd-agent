@@ -1,4 +1,6 @@
-# Vybd Agent v1
+# Vybd Agent
+
+Build a physical-product brand with your own AI agent. Vybd handles the supply chain. Part of [Vybd](https://www.vybd.ai).
 
 Self-serve Vybd: founders shape a brand idea into a living Brand Brief through conversation, then buy real work on it (market snapshot, find suppliers) from Vybd agents backed by human operators. The same service layer powers the web chat and a remote MCP server, so a brief started in Claude or ChatGPT shows up live in the web app.
 
@@ -59,3 +61,11 @@ These live in one place each and are easy to change:
 See BACKLOG.md for planned follow-ups (first: "Continue with ChatGPT", so founders can run web chat on their ChatGPT plan).
 
 Shopify store generation, Kickstarter, design jobs, team members, outside operators, mobile apps, emailing magic links (console only for now), email/Slack paging for ops (the console updates live and the server logs `[ops]` lines).
+
+## Contributing
+
+Read the [contributing guide](https://github.com/vybd-commerce/.github/blob/main/CONTRIBUTING.md) and `docs/TEAM_BRIEF.md`. Report security problems privately as described in [SECURITY.md](https://github.com/vybd-commerce/.github/blob/main/SECURITY.md).
+
+## Licence
+
+[Apache-2.0](LICENSE). The licence does not cover the Vybd name or logo.
