@@ -11,11 +11,14 @@ pnpm install
 cp .env.example .env.local      # then fill in AUTH_SECRET (openssl rand -base64 32) and ANTHROPIC_API_KEY
 createdb vybd_agent             # or: docker compose up -d, and point DATABASE_URL at port 5433
 pnpm db:migrate
+pnpm db:seed                    # optional: sample users, a shared brand and one job in each status
 pnpm dev                        # web app on :3000
 pnpm worker                     # runs agent jobs (market snapshot); separate process
 ```
 
 Sign in with any email: the magic link is printed in the `pnpm dev` log. Google sign-in turns on when `AUTH_GOOGLE_ID`/`AUTH_GOOGLE_SECRET` are set.
+
+Seed data: `pnpm db:seed` creates `owner@seed.vybd.test`, `member@seed.vybd.test` and `operator@seed.vybd.test`, and a brand, "Rootwell (seed)", with a usable brief and one job in each status. Each run rebuilds that brand from scratch. It refuses to run when `NODE_ENV` or `RAILWAY_ENVIRONMENT_NAME` is `production`. To seed staging, run it locally with `DATABASE_URL` pointing at the staging database.
 
 Operators: add emails to `OPERATOR_EMAILS` (applied at sign-in) or run `pnpm make-operator you@example.com`. Operators get an Ops console link in the sidebar (`/ops`).
 
