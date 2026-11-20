@@ -78,3 +78,17 @@ export async function postToBrand(
   const conv = await latestConversation(brandId, "web", true);
   return appendMessage(conv!.id, { role: input.role ?? "assistant", content: input.content, attachments: input.attachments });
 }
+
+/** Record a state-changing MCP tool call in the brand thread, so teammates see who and which agent did it. */
+export async function logAgentActivity(
+  brandId: string,
+  input: { userId: string; client: string; tool: string; summary: string },
+) {
+  const conv = await latestConversation(brandId, "web", true);
+  return appendMessage(conv!.id, {
+    role: "system",
+    authorId: input.userId,
+    content: input.summary,
+    attachments: { mcpActivity: { tool: input.tool, client: input.client } },
+  });
+}
