@@ -84,6 +84,30 @@ function SystemNote({ content }: { content: string }) {
   return <p className="text-center text-[12px] text-ink-3">{content}</p>;
 }
 
+/** A teammate's agent changed something over MCP: who, which agent, what. Quieter than chat. */
+function ActivityEntry({ content, client, author }: { content: string; client: string; author: Author | undefined }) {
+  const name = author?.name ?? "Former member";
+  return (
+    <div className="flex items-start gap-3 text-[13px] text-ink-2">
+      <span aria-hidden className="flex h-[26px] w-[26px] shrink-0 items-center justify-center">
+        {author?.image ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={author.image} alt="" className="h-5 w-5 rounded-full object-cover" />
+        ) : (
+          <span className="flex h-5 w-5 items-center justify-center rounded-full bg-subtle text-[10px] font-semibold">
+            {name.slice(0, 1).toUpperCase()}
+          </span>
+        )}
+      </span>
+      <p className="min-w-0 pt-0.5">
+        <span className="font-medium text-ink">{name}</span> via {client}
+        <span className="ml-1.5 font-mono text-[11px] tracking-wide text-ink-3 uppercase">MCP</span>
+        <span className="block">{content}</span>
+      </p>
+    </div>
+  );
+}
+
 function BriefDiffChips({ diff }: { diff: NonNullable<MessageAttachments["briefDiff"]> }) {
   const keys = Object.keys(diff) as BriefFieldKey[];
   if (!keys.length) return null;
@@ -237,7 +261,16 @@ export function MessageList(props: {
     <div className="flex flex-col gap-[22px]">
       {props.messages.map((m, i) =>
         m.role === "system" ? (
-          <SystemNote key={m.id} content={m.content} />
+          m.attachments.mcpActivity ? (
+            <ActivityEntry
+              key={m.id}
+              content={m.content}
+              client={m.attachments.mcpActivity.client}
+              author={m.authorId ? authors.get(m.authorId) : undefined}
+            />
+          ) : (
+            <SystemNote key={m.id} content={m.content} />
+          )
         ) : m.role === "user" ? (
           shared && m.authorId !== props.viewerId ? (
             <MemberMessage key={m.id} content={m.content} author={m.authorId ? authors.get(m.authorId) : undefined} />

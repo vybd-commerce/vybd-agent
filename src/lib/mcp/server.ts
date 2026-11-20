@@ -1,7 +1,9 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { INTERVIEW_SCRIPT, JOBS_GUIDE } from "@/lib/agent/prompts";
+import { BRIEF_LABELS, type BriefFieldKey } from "@/lib/brief";
 import type { Ctx } from "@/lib/services/context";
+import { logAgentActivity } from "@/lib/services/conversations";
 import { appUrl } from "@/lib/stripe";
 import { runTool, toolsFor } from "@/lib/tools";
 
@@ -69,8 +71,35 @@ export function headline(tool: string, result: unknown): string | null {
   }
 }
 
+/** Brand and one-line summary for a state-changing call, as teammates read it in the thread. Null skips the entry. */
+export function activityLine(tool: string, args: unknown, result: unknown): { brandId: string; summary: string } | null {
+  const a = (args ?? {}) as Obj;
+  const r = (result ?? {}) as Obj;
+  const brandId = String(a.brandId ?? r.brandId ?? r.id);
+  switch (tool) {
+    case "create_brand":
+      return { brandId, summary: `Created the brand ${r.name}` };
+    case "update_brand_brief": {
+      const changed = (r.changed as BriefFieldKey[] | undefined) ?? [];
+      if (!changed.length) return null;
+      return { brandId, summary: `Updated the brief: ${changed.map((k) => BRIEF_LABELS[k] ?? k).join(", ")}` };
+    }
+    case "quote_job":
+      return { brandId, summary: `Quoted ${r.title} · ${r.price}` };
+    case "approve_job":
+      return { brandId, summary: r.checkoutUrl ? `Approved ${r.title}, waiting on payment` : `Approved ${r.title}` };
+    case "submit_job_result":
+      return { brandId, summary: `Delivered ${r.title}` };
+    case "create_share_page":
+      return { brandId, summary: "Published the share page" };
+    default:
+      return null;
+  }
+}
+
 /** Build an MCP server bound to one signed-in user. Tools are the same table the web agent uses. */
-export function createMcpServer(ctx: Ctx) {
+export function createMcpServer(ctx: Ctx, opts: { clientName?: string | null } = {}) {
+  const client = opts.clientName?.trim() || "an AI agent";
   const server = new McpServer(
     { name: "vybd", version: "1.0.0" },
     { instructions: MCP_PREAMBLE },
@@ -83,6 +112,13 @@ export function createMcpServer(ctx: Ctx) {
       async (args: unknown) => {
         const res = await runTool(tool.name, args, { ctx, surface: "mcp" });
         if (!res.ok) return { content: [{ type: "text" as const, text: res.error }], isError: true };
+        const activity = "writes" in tool && tool.writes ? activityLine(tool.name, args, res.result) : null;
+        if (activity) {
+          // The change already happened; a failed log must not make the agent retry it.
+          await logAgentActivity(activity.brandId, { userId: ctx.userId, client, tool: tool.name, ...activity }).catch((err) =>
+            console.error("MCP activity log failed", err),
+          );
+        }
         const line = headline(tool.name, res.result);
         return {
           content: [
