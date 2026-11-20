@@ -168,6 +168,40 @@ export const inviteUses = pgTable(
   (t) => [primaryKey({ columns: [t.token, t.userId] })],
 );
 
+// A brand's work split into areas a member can own. Every brand starts with DEFAULT_LANES (src/lib/services/lanes.ts).
+export const lanes = pgTable(
+  "lanes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    brandId: uuid("brand_id")
+      .notNull()
+      .references(() => brands.id, { onDelete: "cascade" }),
+    key: text("key").notNull(),
+    title: text("title").notNull(),
+    // Null while nobody has claimed the lane.
+    ownerId: text("owner_id").references(() => users.id, { onDelete: "set null" }),
+    position: integer("position").notNull().default(0),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("lanes_brand_key_idx").on(t.brandId, t.key)],
+);
+
+export const laneTasks = pgTable(
+  "lane_tasks",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    laneId: uuid("lane_id")
+      .notNull()
+      .references(() => lanes.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    done: boolean("done").notNull().default(false),
+    doneBy: text("done_by").references(() => users.id, { onDelete: "set null" }),
+    position: integer("position").notNull().default(0),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => [index("lane_tasks_lane_idx").on(t.laneId, t.position)],
+);
+
 export const briefVersions = pgTable(
   "brief_versions",
   {
