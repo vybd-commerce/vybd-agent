@@ -24,6 +24,8 @@ export type MessageAttachments = {
   autopilot?: { cycle: number; of: number };
   /** Final Autopilot message: what it did, with counts. */
   autopilotSummary?: { items: { label: string; count: number }[] };
+  /** A state-changing call from someone's own agent over MCP. Content holds the one-line summary. */
+  mcpActivity?: { tool: string; client: string };
   error?: string;
 };
 

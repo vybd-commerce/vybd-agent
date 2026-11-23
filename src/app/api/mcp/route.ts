@@ -1,7 +1,7 @@
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { createMcpServer } from "@/lib/mcp/server";
 import { appUrl } from "@/lib/stripe";
-import { verifyAccessToken } from "@/lib/oauth";
+import { getClient, verifyAccessToken } from "@/lib/oauth";
 import { ctxForUser } from "@/lib/services/context";
 import { rateLimit, tooManyRequests } from "@/lib/rate-limit";
 
@@ -33,7 +33,8 @@ async function handle(req: Request) {
   const limit = await rateLimit(`mcp:${token.userId}`, 120, 60);
   if (!limit.ok) return tooManyRequests(limit.retryAfter, cors);
 
-  const server = createMcpServer(ctx);
+  const client = await getClient(token.clientId);
+  const server = createMcpServer(ctx, { clientName: client?.name });
   const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
   await server.connect(transport);
   const res = await transport.handleRequest(req);
