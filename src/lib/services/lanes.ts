@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, exists, inArray, isNull, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { type Ctx, ForbiddenError, InvalidStateError, NotFoundError } from "./context";
 import { getBrand, getMemberBrand } from "./brands";
@@ -74,11 +74,13 @@ export async function releaseLane(ctx: Ctx, laneId: string): Promise<Lane> {
   if (lane.ownerId !== ctx.userId && brand.ownerId !== ctx.userId) {
     throw new ForbiddenError("Only the lane owner or the brand owner can release this lane");
   }
+  // Only clear the owner we checked: if the lane changed hands since the read, nothing is updated.
   const [released] = await db
     .update(schema.lanes)
     .set({ ownerId: null })
-    .where(eq(schema.lanes.id, laneId))
+    .where(and(eq(schema.lanes.id, laneId), eq(schema.lanes.ownerId, lane.ownerId)))
     .returning();
+  if (!released) throw new InvalidStateError("This lane changed hands just now. Refresh and try again.");
   await emitBrandEvent(lane.brandId, { type: "lanes" });
   return released;
 }
@@ -105,12 +107,23 @@ export async function setLaneTaskDone(ctx: Ctx, taskId: string, done: boolean): 
   const task = await db.query.laneTasks.findFirst({ where: eq(schema.laneTasks.id, taskId) });
   if (!task) throw new NotFoundError("Task not found");
   const { lane } = await memberLane(ctx, task.laneId);
-  if (lane.ownerId !== ctx.userId) throw new ForbiddenError("Only the lane owner can tick its tasks");
+  // Ownership is checked in the update itself, so a lane released or reclaimed meanwhile blocks the tick.
   const [updated] = await db
     .update(schema.laneTasks)
     .set({ done, doneBy: done ? ctx.userId : null })
-    .where(eq(schema.laneTasks.id, taskId))
+    .where(
+      and(
+        eq(schema.laneTasks.id, taskId),
+        exists(
+          db
+            .select({ id: schema.lanes.id })
+            .from(schema.lanes)
+            .where(and(eq(schema.lanes.id, task.laneId), eq(schema.lanes.ownerId, ctx.userId))),
+        ),
+      ),
+    )
     .returning();
+  if (!updated) throw new ForbiddenError("Only the lane owner can tick its tasks");
   await emitBrandEvent(lane.brandId, { type: "lanes" });
   return updated;
 }

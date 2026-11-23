@@ -1,4 +1,5 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { eq } from "drizzle-orm";
 import { db, schema, sql } from "@/db";
 import { createBrand } from "@/lib/services/brands";
 import type { Ctx } from "@/lib/services/context";
@@ -84,6 +85,26 @@ describe("lanes", () => {
 
     const [withTasks] = (await listLanes(priya, brand.id)).filter((l) => l.id === lane.id);
     expect(withTasks.tasks.map((t) => t.title)).toEqual(["Shortlist three suppliers", "Ask for samples"]);
+  });
+
+  it("refuses release and tick when ownership changed after the permission check", async () => {
+    const { brand, lanes } = await teamBrand();
+    const lane = lanes[0];
+    await claimLane(sam, lane.id);
+    const task = await addLaneTask(sam, lane.id, "Write positioning");
+    // Priya's request read the lane while she owned it; Sam has owned it since.
+    const stale = { ...(await db.query.lanes.findFirst({ where: eq(schema.lanes.id, lane.id) }))!, ownerId: priya.userId };
+
+    vi.spyOn(db.query.lanes, "findFirst").mockResolvedValueOnce(stale);
+    await expect(releaseLane(priya, lane.id)).rejects.toThrow("changed hands");
+
+    vi.spyOn(db.query.lanes, "findFirst").mockResolvedValueOnce(stale);
+    await expect(setLaneTaskDone(priya, task.id, true)).rejects.toThrow("lane owner");
+    vi.restoreAllMocks();
+
+    const [after] = (await listLanes(owner, brand.id)).filter((l) => l.id === lane.id);
+    expect(after.ownerId).toBe(sam.userId);
+    expect(after.tasks[0]).toMatchObject({ done: false, doneBy: null });
   });
 
   it("notifies the brand channel on every change", async () => {
