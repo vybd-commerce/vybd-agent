@@ -24,6 +24,8 @@ type ToolDef<S extends z.ZodObject> = {
   brandScoped?: boolean;
   /** Limit a tool to some surfaces. Default: all. */
   surfaces?: ToolSurface[];
+  /** Changes state. MCP calls to these post an activity entry to the brand thread. */
+  writes?: boolean;
   handler: (args: z.infer<S>, tc: ToolContext) => Promise<unknown>;
 };
 
@@ -44,6 +46,7 @@ function summarizeJob(job: JobView, surface: ToolSurface = "web") {
   const task = surface === "mcp" && job.awaitingHost && def.researchTask ? def.researchTask(job.spec as never) : null;
   return {
     id: job.id,
+    brandId: job.brandId,
     type: job.type,
     title: job.title,
     status: job.status,
@@ -79,6 +82,7 @@ export const TOOLS = [
   }),
   tool({
     name: "create_brand",
+    writes: true,
     description:
       "Create a new brand workspace for an idea. Use a working name if the founder has none yet; it can change later.",
     input: z.object({ name: z.string().max(80).optional().describe("Working name for the brand.") }),
@@ -97,6 +101,7 @@ export const TOOLS = [
   }),
   tool({
     name: "update_brand_brief",
+    writes: true,
     description: `Patch Brand Brief fields as soon as the founder gives you information. Only include fields that changed; send the complete new value for a field (arrays replace). Writes a new brief version. Fields: ${BRIEF_FIELDS.join(", ")}. Use 'asking' to mark which fields your next question is about.`,
     input: z.object({
       brandId,
@@ -116,6 +121,7 @@ export const TOOLS = [
   }),
   tool({
     name: "quote_job",
+    writes: true,
     description: `Quote a unit of work for the brand. Creates a quoted job with price, ETA and who fulfils it; nothing is charged until the founder approves. Types: market_snapshot (${jobType("market_snapshot").deliverable}), find_suppliers (${jobType("find_suppliers").deliverable}), brand_research (${jobType("brand_research").deliverable}). Fill the spec from the brief; anything omitted is drafted from the brief.`,
     input: z.object({
       brandId,
@@ -132,6 +138,7 @@ export const TOOLS = [
   }),
   tool({
     name: "approve_job",
+    writes: true,
     description:
       "Approve a quoted job on the founder's explicit instruction. Free jobs start immediately. Paid jobs return a checkout link the founder must open to pay; never claim payment happened.",
     input: z.object({ jobId: z.string().uuid() }),
@@ -148,6 +155,7 @@ export const TOOLS = [
   }),
   tool({
     name: "submit_job_result",
+    writes: true,
     description:
       "Deliver a job that runs on you (approve_job or get_job returned researchTask). Pass the full result matching researchTask.resultSchema. If it's rejected, fix what the error names and submit again.",
     input: z.object({
@@ -177,6 +185,7 @@ export const TOOLS = [
   }),
   tool({
     name: "create_share_page",
+    writes: true,
     description:
       "Publish the brief as a public page that asks 'would you buy this?', the price people would pay, and an email for launch. Returns the URL to share.",
     input: z.object({ brandId }),
