@@ -1,4 +1,4 @@
-import { sql } from "@/db";
+import { listen } from "@/db";
 import { getBrand } from "@/lib/services/brands";
 import { brandChannel } from "@/lib/services/events";
 import { errorResponse } from "@/lib/http";
@@ -31,7 +31,7 @@ export async function GET(req: Request, ctx: RouteContext<"/api/brands/[id]/even
           cleanup();
         }
       };
-      const sub = await sql.listen(brandChannel(id), (payload) => send(payload));
+      const sub = await listen(brandChannel(id), (payload) => send(payload));
       const ping = setInterval(() => send(JSON.stringify({ type: "ping" })), 25_000);
       cleanup = () => {
         clearInterval(ping);
