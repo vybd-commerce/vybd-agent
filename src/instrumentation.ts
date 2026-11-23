@@ -4,6 +4,9 @@ export async function register() {
   if (process.env.NEXT_RUNTIME === "nodejs") {
     const { initMonitoring } = await import("@/lib/monitoring");
     initMonitoring("web");
+    const { resolveListenUrl } = await import("@/db/listen-url");
+    const { warning } = process.env.DATABASE_URL ? resolveListenUrl(process.env) : {};
+    if (warning) console.warn(`[vybd] ${warning}`);
   }
 }
 
