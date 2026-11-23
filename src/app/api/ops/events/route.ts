@@ -1,4 +1,4 @@
-import { sql } from "@/db";
+import { listen } from "@/db";
 import { OPS_CHANNEL } from "@/lib/services/events";
 import { getCtx } from "@/lib/session";
 
@@ -19,7 +19,7 @@ export async function GET(req: Request) {
           cleanup();
         }
       };
-      const sub = await sql.listen(OPS_CHANNEL, send);
+      const sub = await listen(OPS_CHANNEL, send);
       const ping = setInterval(() => send(JSON.stringify({ type: "ping" })), 25_000);
       cleanup = () => {
         clearInterval(ping);
