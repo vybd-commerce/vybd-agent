@@ -388,5 +388,5 @@ async function executeTool(
     if (!s.jobRefs.includes(job.id)) s.jobRefs.push(job.id);
     s.emit({ type: "job", jobId: job.id });
   }
-  return ok(res.result);
+  return ok(res.headline ? `${res.headline}\n${JSON.stringify(res.result, null, 2)}` : res.result);
 }

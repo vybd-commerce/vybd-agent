@@ -7,6 +7,7 @@ import { type Ctx, ForbiddenError, NotFoundError } from "./context";
 import { builderEnabled } from "@/lib/builder/client";
 import { ensureBuilderBrand } from "./builder-sync";
 import { emitBrandEvent } from "./events";
+import { createDefaultLanes } from "./lanes";
 
 const slugSuffix = customAlphabet("abcdefghijkmnpqrstuvwxyz23456789", 6);
 
@@ -42,6 +43,7 @@ export async function createBrand(ctx: Ctx, input: { name?: string }) {
     .returning();
   await db.insert(schema.brandMembers).values({ brandId: brand.id, userId: ctx.userId, role: "owner" });
   await db.insert(schema.briefVersions).values({ brandId: brand.id, version: 0, fields: {}, source: "chat" });
+  await createDefaultLanes(brand.id);
   // Link the Brand Builder brand now; if the builder is down, the first brief read or write retries.
   if (builderEnabled()) await ensureBuilderBrand(brand.id).catch((err) => console.error("[builder] provision failed", err));
   return brand;
