@@ -5,6 +5,7 @@ export type BrandEvent =
   | { type: "job"; jobId: string; status: string }
   | { type: "message"; conversationId: string }
   | { type: "brand" }
+  | { type: "lanes" }
   | { type: "feedback" };
 
 // Channel names must be identifiers; uuids contain dashes.
