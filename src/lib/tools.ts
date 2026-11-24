@@ -6,7 +6,8 @@ import { createBrand, listBrands } from "@/lib/services/brands";
 import { getBrandBrief, updateBrandBrief, type BriefSource } from "@/lib/services/brief";
 import type { Ctx } from "@/lib/services/context";
 import { createSharePage, getFeedback } from "@/lib/services/feedback";
-import { getOrCreateInvite } from "@/lib/services/invites";
+import { acceptInvite, getOrCreateInvite } from "@/lib/services/invites";
+import { myWork } from "@/lib/services/my-work";
 import { approveJob, getJob, listJobs, quoteJob, submitHostResult, type JobView } from "@/lib/services/jobs";
 import { addLaneTask, claimLane, listLanes, releaseLane, setLaneTaskDone } from "@/lib/services/lanes";
 
@@ -38,6 +39,12 @@ function tool<S extends z.ZodObject, R>(def: ToolDef<S, R>) {
 const brandId = z.string().uuid().describe("The brand's id (from list_brands or create_brand).");
 const laneId = z.string().uuid().describe("The lane's id from list_lanes.");
 const jobTypeEnum = z.enum(JOB_TYPE_KEYS as [string, ...string[]]);
+
+/** Accept a full /join/<token> URL or the bare token. */
+function inviteToken(input: string) {
+  const m = input.trim().match(/\/join\/([A-Za-z0-9_-]+)/);
+  return m ? m[1] : input.trim();
+}
 
 function oneLine(title: string) {
   return title.replace(/\s+/g, " ").trim();
@@ -254,6 +261,28 @@ export const TOOLS = [
     brandScoped: true,
     handler: async ({ brandId, taskId, done }, { ctx }) => setLaneTaskDone(ctx, taskId, done, brandId),
     headline: (task) => `Marked “${oneLine(task.title)}” ${task.done ? "complete" : "incomplete"}.`,
+  }),
+  tool({
+    name: "accept_invite",
+    writes: true,
+    description:
+      "Join a brand with an invite link or token someone shared (https://…/join/<token>). Afterwards, call list_lanes and offer to claim a lane.",
+    input: z.object({ invite: z.string().trim().min(1).max(300).describe("The invite URL or its token.") }),
+    handler: async ({ invite }, { ctx }) => acceptInvite(ctx, inviteToken(invite)),
+    headline: (r) => (r.joined ? "Joined the brand." : "Already on this brand."),
+  }),
+  tool({
+    name: "my_tasks",
+    description:
+      "What's on the signed-in person's plate across all their brands: lanes they own with open tasks, and unowned lanes they could claim.",
+    input: z.object({ includeDone: z.boolean().optional() }),
+    handler: async ({ includeDone }, { ctx }) => myWork(ctx, { includeDone }),
+    headline: ({ lanes, unowned }) => {
+      const open = lanes.reduce((n, l) => n + l.tasks.filter((t) => !t.done).length, 0);
+      const parts = [`${lanes.length} ${lanes.length === 1 ? "lane" : "lanes"}, ${open} open ${open === 1 ? "task" : "tasks"}`];
+      if (unowned.length) parts.push(`${unowned.length} unowned ${unowned.length === 1 ? "lane" : "lanes"}`);
+      return `${parts.join(" · ")}.`;
+    },
   }),
   tool({
     name: "get_feedback",

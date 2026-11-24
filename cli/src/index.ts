@@ -15,7 +15,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { OAuthClientInformationMixed, OAuthClientMetadata, OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
 
-const VERSION = "0.1.0";
+const VERSION = "0.2.0";
 const SERVER = (process.env.VYBD_URL || "https://web-production-c9577.up.railway.app").replace(/\/$/, "");
 const MCP_URL = `${SERVER}/api/mcp`;
 
@@ -333,6 +333,99 @@ function install(host?: string) {
   }
 }
 
+// ---------- Team: invites, lanes and lane tasks ----------
+
+const flag = (name: string) => process.argv.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3);
+
+type LaneTask = { id: string; title: string; done: boolean };
+type Lane = { id: string; key: string; title: string; ownerId: string | null; tasks: LaneTask[] };
+type MyWork = {
+  lanes: { brand: string; brandId: string; laneId: string; lane: string; tasks: LaneTask[] }[];
+  unowned: { brand: string; lane: string }[];
+};
+
+const shortId = (id: string) => id.slice(0, 8);
+
+/** By lane id, key ("sourcing") or title prefix. */
+function pickLane(lanes: Lane[], ref?: string): Lane {
+  if (!ref) fail("Which lane? Run `vybd lanes` to see them.");
+  const lower = ref.toLowerCase();
+  const hit =
+    lanes.find((l) => l.id === ref || l.key === lower) ?? lanes.find((l) => l.title.toLowerCase().startsWith(lower));
+  if (!hit) fail(`No lane matches "${ref}". Lanes: ${lanes.map((l) => l.key).join(", ")}`);
+  return hit;
+}
+
+/** By full task id or the 8-character prefix `vybd lanes` prints. */
+function pickTask(lanes: Lane[], ref?: string): LaneTask {
+  if (!ref) fail("Which task? Pass its id from `vybd lanes`.");
+  const hits = lanes.flatMap((l) => l.tasks).filter((t) => t.id.startsWith(ref.toLowerCase()));
+  if (hits.length !== 1) fail(hits.length ? `"${ref}" matches several tasks; use more characters.` : `No task "${ref}". Run \`vybd lanes\`.`);
+  return hits[0];
+}
+
+async function invite(ref?: string) {
+  const b = await resolveBrand(ref ?? flag("brand"));
+  const r = await call<{ url: string; expiresAt: string }>("invite_member", { brandId: b.id });
+  out(`Share this link to add people to ${b.name} (valid until ${new Date(r.expiresAt).toDateString()}):\n${r.url}`, r);
+}
+
+async function joinBrand(link?: string) {
+  if (!link) fail("Usage: vybd join <invite link or token>");
+  const r = await call<{ brandId: string; joined: boolean }>("accept_invite", { invite: link });
+  out(`${r.joined ? "Joined" : "Already on"} ${brandUrl(r.brandId)}\nPick a lane: vybd lanes, then vybd claim <lane>`, r);
+}
+
+async function lanes(ref?: string) {
+  const b = await resolveBrand(ref ?? flag("brand"));
+  const list = await call<Lane[]>("list_lanes", { brandId: b.id });
+  const rows = list.flatMap((l) => [
+    `${l.title.padEnd(14)} ${l.ownerId ? "owned" : "nobody owns this yet"}`,
+    ...l.tasks.map((t) => `  ${t.done ? "[x]" : "[ ]"} ${shortId(t.id)}  ${t.title}`),
+  ]);
+  out([`${b.name} lanes`, ...rows].join("\n"), list);
+}
+
+async function laneAction(action: "claim_lane" | "release_lane", ref?: string) {
+  const b = await resolveBrand(flag("brand"));
+  const lane = pickLane(await call<Lane[]>("list_lanes", { brandId: b.id }), ref);
+  const r = await call<Lane>(action, { brandId: b.id, laneId: lane.id });
+  out(action === "claim_lane" ? `You own ${r.title} on ${b.name}.` : `${r.title} on ${b.name} is unassigned.`, r);
+}
+
+async function myTasks() {
+  const w = await call<MyWork>("my_tasks", { includeDone: flags.has("--done") });
+  const rows = w.lanes.flatMap((l) => [
+    `${l.brand} · ${l.lane}`,
+    ...(l.tasks.length ? l.tasks.map((t) => `  ${t.done ? "[x]" : "[ ]"} ${shortId(t.id)}  ${t.title}`) : ["  no open tasks"]),
+  ]);
+  if (w.unowned.length) rows.push("", `Nobody owns: ${w.unowned.map((u) => `${u.lane} (${u.brand})`).join(", ")}`);
+  out(rows.length ? rows.join("\n") : "You don't own any lanes yet. Run `vybd lanes`, then `vybd claim <lane>`.", w);
+}
+
+async function task(sub?: string, rest: string[] = []) {
+  const b = await resolveBrand(flag("brand"));
+  const list = await call<Lane[]>("list_lanes", { brandId: b.id });
+  switch (sub) {
+    case "add": {
+      const [laneRef, ...words] = rest;
+      const title = words.join(" ");
+      if (!laneRef || !title) fail('Usage: vybd task add <lane> "<title>" [--brand=name]');
+      const lane = pickLane(list, laneRef);
+      const t = await call<LaneTask>("add_task", { brandId: b.id, laneId: lane.id, title });
+      return out(`Added to ${lane.title}: ${shortId(t.id)}  ${t.title}`, t);
+    }
+    case "done":
+    case "undo": {
+      const picked = pickTask(list, rest[0]);
+      const t = await call<LaneTask>("update_task", { brandId: b.id, taskId: picked.id, done: sub === "done" });
+      return out(`${t.done ? "[x]" : "[ ]"} ${t.title}`, t);
+    }
+    default:
+      fail("Usage: vybd task add <lane> \"<title>\" | vybd task done|undo <id>  [--brand=name]");
+  }
+}
+
 const HELP = `vybd ${VERSION} · ${SERVER}
 
   vybd login                     Sign in (opens your browser)
@@ -348,6 +441,16 @@ const HELP = `vybd ${VERSION} · ${SERVER}
   vybd quote <type> [--brand=name]  Quote market_snapshot, find_suppliers or brand_research
   vybd approve <jobId>           Approve a quoted job
   vybd open [brand]              Open the brand in the web app
+
+  vybd invite [brand]            Get the invite link to add people
+  vybd join <link>               Join a brand from an invite link
+  vybd lanes [brand]             Lanes, who owns them, and their tasks
+  vybd claim <lane>              Own a lane (e.g. sourcing)
+  vybd release <lane>            Give a lane back
+  vybd tasks [--done]            Your lanes and open tasks across brands
+  vybd task add <lane> "<title>" Add a task to a lane
+  vybd task done|undo <id>       Tick a task (lane owner only)
+                                 Team commands take --brand=name (default: most recent)
 
   vybd install claude|codex      Connect Vybd to Claude Code or Codex
 
@@ -379,6 +482,20 @@ async function main() {
       return openBrand(rest.join(" ") || undefined);
     case "install":
       return install(rest[0]);
+    case "invite":
+      return invite(rest.join(" ") || undefined);
+    case "join":
+      return joinBrand(rest[0]);
+    case "lanes":
+      return lanes(rest.join(" ") || undefined);
+    case "claim":
+      return laneAction("claim_lane", rest[0]);
+    case "release":
+      return laneAction("release_lane", rest[0]);
+    case "tasks":
+      return myTasks();
+    case "task":
+      return task(rest[0], rest.slice(1));
     case "version":
       return console.log(VERSION);
     case undefined:
