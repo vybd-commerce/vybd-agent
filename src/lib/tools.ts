@@ -8,6 +8,7 @@ import type { Ctx } from "@/lib/services/context";
 import { createSharePage, getFeedback } from "@/lib/services/feedback";
 import { getOrCreateInvite } from "@/lib/services/invites";
 import { approveJob, getJob, listJobs, quoteJob, submitHostResult, type JobView } from "@/lib/services/jobs";
+import { addLaneTask, claimLane, listLanes, releaseLane, setLaneTaskDone } from "@/lib/services/lanes";
 
 /**
  * One tool table backs every surface: our web orchestrator calls these as Anthropic tools,
@@ -16,7 +17,7 @@ import { approveJob, getJob, listJobs, quoteJob, submitHostResult, type JobView 
 export type ToolSurface = "web" | "mcp";
 export type ToolContext = { ctx: Ctx; surface: ToolSurface };
 
-type ToolDef<S extends z.ZodObject> = {
+type ToolDef<S extends z.ZodObject, R> = {
   name: string;
   description: string;
   input: S;
@@ -26,15 +27,21 @@ type ToolDef<S extends z.ZodObject> = {
   surfaces?: ToolSurface[];
   /** Changes state. MCP calls to these post an activity entry to the brand thread. */
   writes?: boolean;
-  handler: (args: z.infer<S>, tc: ToolContext) => Promise<unknown>;
+  handler: (args: z.infer<S>, tc: ToolContext) => Promise<R>;
+  headline?: (result: R) => string;
 };
 
-function tool<S extends z.ZodObject>(def: ToolDef<S>) {
+function tool<S extends z.ZodObject, R>(def: ToolDef<S, R>) {
   return def;
 }
 
 const brandId = z.string().uuid().describe("The brand's id (from list_brands or create_brand).");
+const laneId = z.string().uuid().describe("The lane's id from list_lanes.");
 const jobTypeEnum = z.enum(JOB_TYPE_KEYS as [string, ...string[]]);
+
+function oneLine(title: string) {
+  return title.replace(/\s+/g, " ").trim();
+}
 
 function sourceFor(surface: ToolSurface): BriefSource {
   return surface === "mcp" ? "mcp" : "chat";
@@ -201,6 +208,58 @@ export const TOOLS = [
     handler: async (args, { ctx }) => getOrCreateInvite(ctx, args.brandId),
   }),
   tool({
+    name: "list_lanes",
+    description: "List the brand's lanes with their current owners and task checklists. Call this first to get lane and task IDs before making changes.",
+    input: z.object({ brandId }),
+    brandScoped: true,
+    handler: async ({ brandId }, { ctx }) => listLanes(ctx, brandId),
+    headline: (lanes) => {
+      if (!lanes.length) return "No lanes yet.";
+      const claimed = lanes.filter((lane) => lane.ownerId !== null).length;
+      return `${lanes.length} ${lanes.length === 1 ? "lane" : "lanes"}, ${claimed} claimed.`;
+    },
+  }),
+  tool({
+    name: "claim_lane",
+    writes: true,
+    description: "Claim an unassigned lane for the signed-in brand teammate.",
+    input: z.object({ brandId, laneId }),
+    brandScoped: true,
+    handler: async ({ brandId, laneId }, { ctx }) => claimLane(ctx, laneId, brandId),
+    headline: (lane) => `You own the ${oneLine(lane.title)} lane.`,
+  }),
+  tool({
+    name: "release_lane",
+    writes: true,
+    description: "Make a lane unassigned. The lane owner or brand owner can release it.",
+    input: z.object({ brandId, laneId }),
+    brandScoped: true,
+    handler: async ({ brandId, laneId }, { ctx }) => releaseLane(ctx, laneId, brandId),
+    headline: (lane) => `The ${oneLine(lane.title)} lane is unassigned.`,
+  }),
+  tool({
+    name: "add_task",
+    writes: true,
+    description: "Append a task to a lane's checklist. Any brand teammate can add a task.",
+    input: z.object({ brandId, laneId, title: z.string().trim().min(1).max(200) }),
+    brandScoped: true,
+    handler: async ({ brandId, laneId, title }, { ctx }) => addLaneTask(ctx, laneId, title, brandId),
+    headline: (task) => `Added “${oneLine(task.title)}”.`,
+  }),
+  tool({
+    name: "update_task",
+    writes: true,
+    description: "Mark a checklist task complete or incomplete. Only the lane owner can do this.",
+    input: z.object({
+      brandId,
+      taskId: z.string().uuid().describe("The task's id from list_lanes or add_task."),
+      done: z.boolean().describe("True to mark complete, false to mark incomplete."),
+    }),
+    brandScoped: true,
+    handler: async ({ brandId, taskId, done }, { ctx }) => setLaneTaskDone(ctx, taskId, done, brandId),
+    headline: (task) => `Marked “${oneLine(task.title)}” ${task.done ? "complete" : "incomplete"}.`,
+  }),
+  tool({
     name: "get_feedback",
     description: "Aggregated responses from the brand's share page: would-buy counts, price answers and comments.",
     input: z.object({ brandId }),
@@ -228,9 +287,10 @@ export async function runTool(name: string, rawInput: unknown, tc: ToolContext) 
   const parsed = def.input.safeParse(rawInput);
   if (!parsed.success) return { ok: false as const, error: `Invalid input: ${z.prettifyError(parsed.error)}` };
   try {
-    // Each def's handler accepts its own schema's output.
-    const result = await (def.handler as (a: unknown, t: ToolContext) => Promise<unknown>)(parsed.data, tc);
-    return { ok: true as const, result };
+    // The selected definition pairs its input schema, handler, and result formatter.
+    const { handler, headline } = def as ToolDef<z.ZodObject, unknown>;
+    const result = await handler(parsed.data, tc);
+    return { ok: true as const, result, ...(headline && { headline: headline(result) }) };
   } catch (err) {
     return { ok: false as const, error: err instanceof Error ? err.message : String(err) };
   }
