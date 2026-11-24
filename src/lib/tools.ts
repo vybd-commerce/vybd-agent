@@ -209,7 +209,7 @@ export const TOOLS = [
   }),
   tool({
     name: "list_lanes",
-    description: "List the brand's lanes with their current owners and task checklists.",
+    description: "List the brand's lanes with their current owners and task checklists. Call this first to get lane and task IDs before making changes.",
     input: z.object({ brandId }),
     brandScoped: true,
     handler: async ({ brandId }, { ctx }) => listLanes(ctx, brandId),
@@ -221,6 +221,7 @@ export const TOOLS = [
   }),
   tool({
     name: "claim_lane",
+    writes: true,
     description: "Claim an unassigned lane for the signed-in brand teammate.",
     input: z.object({ brandId, laneId }),
     brandScoped: true,
@@ -229,6 +230,7 @@ export const TOOLS = [
   }),
   tool({
     name: "release_lane",
+    writes: true,
     description: "Make a lane unassigned. The lane owner or brand owner can release it.",
     input: z.object({ brandId, laneId }),
     brandScoped: true,
@@ -237,6 +239,7 @@ export const TOOLS = [
   }),
   tool({
     name: "add_task",
+    writes: true,
     description: "Append a task to a lane's checklist. Any brand teammate can add a task.",
     input: z.object({ brandId, laneId, title: z.string().trim().min(1).max(200) }),
     brandScoped: true,
@@ -245,6 +248,7 @@ export const TOOLS = [
   }),
   tool({
     name: "update_task",
+    writes: true,
     description: "Mark a checklist task complete or incomplete. Only the lane owner can do this.",
     input: z.object({
       brandId,

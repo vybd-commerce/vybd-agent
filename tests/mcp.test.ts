@@ -112,6 +112,38 @@ describe("MCP lane tools", () => {
     expect((await listLanes(owner, brandId))[1].ownerId).toBe(member.userId);
   });
 
+  it("logs successful lane mutations in the brand thread and leaves reads silent", async () => {
+    const { brandId, lanes } = await teamBrand();
+    const upperBrandId = brandId.toUpperCase();
+    const args = { brandId: upperBrandId, laneId: lanes[1].id };
+    await success(teammate, "list_lanes", { brandId }, "4 lanes, 0 claimed.");
+    expect(await activity(brandId)).toHaveLength(0);
+
+    await success(teammate, "claim_lane", args, "You own the Research lane.");
+    expect(await activity(brandId)).toMatchObject([{
+      role: "system",
+      authorId: member.userId,
+      content: "Claimed the Research lane",
+      attachments: { mcpActivity: { tool: "claim_lane", client: "an AI agent" } },
+    }]);
+
+    const task = await success<LaneTask>(teammate, "add_task", { ...args, title: "Review\nsamples" }, "Added “Review samples”.");
+    const update = { brandId: upperBrandId, taskId: task.id };
+    await success(teammate, "update_task", { ...update, done: true }, "Marked “Review samples” complete.");
+    await success(teammate, "update_task", { ...update, done: false }, "Marked “Review samples” incomplete.");
+    await success(teammate, "release_lane", args, "The Research lane is unassigned.");
+
+    const entries = await activity(brandId);
+    expect(entries).toHaveLength(5);
+    expect(entries.map((entry) => [entry.attachments.mcpActivity?.tool, entry.content])).toEqual(expect.arrayContaining([
+      ["claim_lane", "Claimed the Research lane"],
+      ["add_task", "Added task “Review samples”"],
+      ["update_task", "Marked “Review samples” complete"],
+      ["update_task", "Marked “Review samples” incomplete"],
+      ["release_lane", "Released the Research lane"],
+    ]));
+  });
+
   it("releases lanes as the lane owner or brand owner", async () => {
     const { brandId, lanes } = await teamBrand();
     const args = { brandId, laneId: lanes[1].id };
@@ -185,11 +217,14 @@ describe("MCP lane tools", () => {
     const laneId = other.lanes[1].id;
     await success(teammate, "claim_lane", { brandId: other.brandId, laneId }, "You own the Research lane.");
     const task = await success<LaneTask>(teammate, "add_task", { brandId: other.brandId, laneId, title: "Original task" }, "Added “Original task”.");
+    const activityCount = (await activity(other.brandId)).length;
 
     await failure(teammate, "claim_lane", { brandId: wrongBrandId, laneId: other.lanes[0].id }, "Lane not found");
     await failure(teammate, "release_lane", { brandId: wrongBrandId, laneId }, "Lane not found");
     await failure(teammate, "add_task", { brandId: wrongBrandId, laneId, title: "Wrong brand" }, "Lane not found");
     await failure(teammate, "update_task", { brandId: wrongBrandId, taskId: task.id, done: true }, "Task not found");
+    expect(await activity(brandId)).toHaveLength(0);
+    expect(await activity(other.brandId)).toHaveLength(activityCount);
     const current = await listLanes(owner, other.brandId);
     expect(current[0].ownerId).toBeNull();
     expect(current[1]).toMatchObject({ ownerId: member.userId, tasks: [{ id: task.id, done: false }] });

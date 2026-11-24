@@ -92,6 +92,18 @@ export function activityLine(tool: string, args: unknown, result: unknown): { br
       return { brandId, summary: `Delivered ${r.title}` };
     case "create_share_page":
       return { brandId, summary: "Published the share page" };
+    case "claim_lane":
+      return { brandId: String(r.brandId), summary: `Claimed the ${r.title} lane` };
+    case "release_lane":
+      return { brandId: String(r.brandId), summary: `Released the ${r.title} lane` };
+    case "add_task":
+    case "update_task": {
+      const title = String(r.title).replace(/\s+/g, " ").trim();
+      const summary = tool === "add_task"
+        ? `Added task “${title}”`
+        : `Marked “${title}” ${r.done ? "complete" : "incomplete"}`;
+      return { brandId: brandId.toLowerCase(), summary };
+    }
     default:
       return null;
   }
