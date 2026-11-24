@@ -119,7 +119,7 @@ export function createMcpServer(ctx: Ctx, opts: { clientName?: string | null } =
             console.error("MCP activity log failed", err),
           );
         }
-        const line = headline(tool.name, res.result);
+        const line = res.headline ?? headline(tool.name, res.result);
         return {
           content: [
             ...(line ? [{ type: "text" as const, text: line }] : []),
