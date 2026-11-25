@@ -4,7 +4,7 @@ import { brandChannel } from "@/lib/services/events";
 import { errorResponse } from "@/lib/http";
 import { getCtx } from "@/lib/session";
 
-export const maxDuration = 800;
+export const maxDuration = 300; // Vercel Hobby cap; clients reconnect and catch up on "ready".
 
 /**
  * Live updates for one brand. Any surface (web chat, MCP, worker, ops console) that changes the brand

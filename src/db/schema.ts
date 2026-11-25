@@ -270,6 +270,10 @@ export const jobs = pgTable(
     stripeCheckoutSession: text("stripe_checkout_session"),
     stripePaymentIntent: text("stripe_payment_intent"),
     agentClaimedAt: timestamp("agent_claimed_at"),
+    // Set only while the job worker runs the job, renewed by its heartbeat. An expired lease means the
+    // worker died mid-run (serverless timeout, redeploy) and the job can be claimed again.
+    agentLeaseExpiresAt: timestamp("agent_lease_expires_at"),
+    agentAttempts: integer("agent_attempts").notNull().default(0),
     // The founder's own assistant (Claude, Codex over MCP) does the agent work, then submits the result.
     hostRun: boolean("host_run").notNull().default(false),
     createdAt: timestamp("created_at").notNull().defaultNow(),

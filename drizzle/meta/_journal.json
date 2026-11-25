@@ -71,6 +71,13 @@
       "when": 1795150930381,
       "tag": "0009_lanes",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1795619664395,
+      "tag": "0010_job_lease",
+      "breakpoints": true
     }
   ]
 }

@@ -384,19 +384,65 @@ export async function applyProposedEdit(ctx: Ctx, messageId: string, index: numb
 // ---------- Worker ----------
 
 /** Atomically claim the next agent job that is ready to run. */
+/** How long a worker's claim lasts without a heartbeat. Longer than the 300 s serverless limit. */
+const AGENT_LEASE_SECONDS = Number(process.env.JOB_LEASE_SECONDS ?? 360);
+/** Runs that may be interrupted (worker died mid-run) before the job goes to the ops queue instead. */
+export const MAX_AGENT_ATTEMPTS = 2;
+
+/**
+ * Claim the oldest agent job that is waiting, or whose worker died mid-run (lease expired) and that has
+ * attempts left. Only worker claims carry a lease, so host-run and demo jobs are never taken over.
+ */
 export async function claimNextAgentJob(): Promise<Job | null> {
-  const rows = await db.execute<{ id: string }>(dsql`
-    update jobs set agent_claimed_at = now()
+  const rows = await db.execute<{ id: string; agent_attempts: number }>(dsql`
+    update jobs set
+      agent_claimed_at = now(),
+      agent_lease_expires_at = now() + make_interval(secs => ${AGENT_LEASE_SECONDS}),
+      agent_attempts = agent_attempts + 1
     where id = (
       select id from jobs
-      where status = 'in_progress' and fulfiller in ('agent', 'hybrid') and agent_claimed_at is null
+      where status = 'in_progress' and fulfiller in ('agent', 'hybrid')
+        and (agent_claimed_at is null
+          or (agent_lease_expires_at < now() and agent_attempts < ${MAX_AGENT_ATTEMPTS}))
       order by created_at
       for update skip locked
       limit 1
     )
-    returning id`);
-  const id = rows[0]?.id;
-  return id ? loadJob(id) : null;
+    returning id, agent_attempts`);
+  const row = rows[0];
+  if (!row) return null;
+  if (row.agent_attempts > 1) await addEvent(row.id, "progress", { note: "Resuming after an interrupted run" }, "system");
+  return loadJob(row.id);
+}
+
+/** Heartbeat from the running worker: keep the claim. No-op once the job has left in_progress or was released. */
+export async function renewAgentLease(jobId: string) {
+  await db.execute(dsql`
+    update jobs set agent_lease_expires_at = now() + make_interval(secs => ${AGENT_LEASE_SECONDS})
+    where id = ${jobId} and status = 'in_progress' and agent_lease_expires_at is not null`);
+}
+
+/** The worker is done with the job (delivered, failed, or a hybrid draft handed to ops): never re-run it. */
+export async function releaseAgentLease(jobId: string) {
+  await db.update(schema.jobs).set({ agentLeaseExpiresAt: null }).where(eq(schema.jobs.id, jobId));
+}
+
+/** Jobs whose worker died mid-run on every attempt go to the ops queue as failed. Returns how many. */
+export async function failAbandonedAgentJobs() {
+  const rows = await db.execute<{ id: string; agent_attempts: number }>(dsql`
+    update jobs set agent_lease_expires_at = null
+    where id in (
+      select id from jobs
+      where status = 'in_progress' and agent_lease_expires_at < now() and agent_attempts >= ${MAX_AGENT_ATTEMPTS}
+      for update skip locked
+    )
+    returning id, agent_attempts`);
+  for (const row of rows) {
+    await failJob(row.id, `The agent run was interrupted ${row.agent_attempts} times (worker stopped mid-run)`).catch((err) =>
+      console.error("[worker] could not fail abandoned job", row.id, err),
+    );
+  }
+  return rows.length;
 }
 
 export async function addAgentProgress(jobId: string, step: string, note: string) {

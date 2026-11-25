@@ -2,7 +2,7 @@ import { listen } from "@/db";
 import { OPS_CHANNEL } from "@/lib/services/events";
 import { getCtx } from "@/lib/session";
 
-export const maxDuration = 800;
+export const maxDuration = 300; // Vercel Hobby cap; clients reconnect and catch up on "ready".
 
 /** Live job changes for the ops console. */
 export async function GET(req: Request) {

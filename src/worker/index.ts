@@ -7,28 +7,11 @@
  */
 import { createServer } from "node:http";
 import { timingSafeEqual } from "node:crypto";
-import { runJob } from "@/lib/jobs/runner";
-import { claimNextAgentJob } from "@/lib/services/jobs";
 import { sql } from "@/db";
-import { cleanupExpired } from "@/lib/oauth";
 import { flushMonitoring, initMonitoring, reportError } from "@/lib/monitoring";
+import { runTick } from "./tick";
 
 initMonitoring("worker");
-
-// Daily sweep, piggybacked on a poll that already touched the database so it never wakes Neon by itself.
-const CLEANUP_EVERY_MS = 24 * 60 * 60 * 1000;
-let lastCleanup = 0;
-async function maybeCleanup() {
-  if (Date.now() - lastCleanup < CLEANUP_EVERY_MS) return;
-  lastCleanup = Date.now();
-  try {
-    await cleanupExpired();
-    console.log("[worker] cleanup done");
-  } catch (err) {
-    console.error("[worker] cleanup failed", err);
-    reportError(err);
-  }
-}
 
 const POLL_MS = Number(process.env.WORKER_POLL_MS ?? 3000);
 let stopping = false;
@@ -71,12 +54,9 @@ async function loop() {
   console.log(`[worker] started, idle poll ${POLL_MS}ms`);
   while (!stopping) {
     try {
-      const job = await claimNextAgentJob();
-      await maybeCleanup();
-      if (job) {
-        await runJob(job);
-        continue;
-      }
+      // One job per pass so a shutdown signal is noticed between jobs.
+      const { ran } = await runTick({ maxJobs: 1 });
+      if (ran) continue;
     } catch (err) {
       console.error("[worker] poll failed", err);
       reportError(err);
