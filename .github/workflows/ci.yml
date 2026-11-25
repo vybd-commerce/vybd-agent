@@ -3,7 +3,7 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, staging]
 
 # Read-only token. Pull requests from forks never get secrets.
 permissions:
