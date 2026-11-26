@@ -5,18 +5,20 @@ import { getBrandBrief } from "./brief";
 import { latestConversation, listMessages } from "./conversations";
 import { getFeedback } from "./feedback";
 import { listJobs } from "./jobs";
+import { listLanes } from "./lanes";
 import { recordUnlock, scoreFrom } from "./score";
 
 /** Everything the three-column brand screen needs, in one read. */
 export async function getBrandState(ctx: Ctx, brandId: string) {
   const brand = await getBrand(ctx, brandId);
   const conversation = await latestConversation(brandId, "web");
-  const [brief, jobs, feedback, messages, members] = await Promise.all([
+  const [brief, jobs, feedback, messages, members, lanes] = await Promise.all([
     getBrandBrief(ctx, brandId),
     listJobs(ctx, brandId),
     getFeedback(ctx, brandId),
     conversation ? listMessages(ctx, conversation.id) : Promise.resolve([]),
     listMembers(brandId),
+    listLanes(ctx, brandId),
   ]);
   const score = scoreFrom({
     fields: brief.fields,
@@ -41,6 +43,12 @@ export async function getBrandState(ctx: Ctx, brandId: string) {
     viewerId: ctx.userId,
     viewerRole: brand.ownerId === ctx.userId ? ("owner" as const) : ("member" as const),
     members: members.map((m) => ({ userId: m.userId, name: m.name ?? m.email?.split("@")[0] ?? "Member", image: m.image, role: m.role })),
+    lanes: lanes.map(({ id, title, ownerId, tasks }) => ({
+      id,
+      title,
+      ownerId,
+      tasks: tasks.map(({ id, title, done }) => ({ id, title, done })),
+    })),
     brief,
     jobs,
     feedback,

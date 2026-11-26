@@ -16,10 +16,11 @@ import { ScoreCard } from "./score-card";
 import { ShareSheet, type ShareMode } from "./share-sheet";
 import { SnapshotTab } from "./snapshot-tab";
 import { StageStepper } from "./stage-stepper";
+import { TeamTab } from "./team-tab";
 import { useBrandState } from "./use-brand-state";
 import { AgentAvatar } from "./wordmark";
 
-type Tab = "brief" | "snapshot" | "jobs";
+type Tab = "brief" | "snapshot" | "team" | "jobs";
 
 const RESUME_STARTERS = ["What's missing from my brief?", "What should I do next?"];
 
@@ -103,7 +104,7 @@ function BrandName({ id, name }: { id: string; name: string }) {
 }
 
 export function BrandWorkspace({ initial }: { initial: BrandState }) {
-  const { state, refresh, flash } = useBrandState(initial);
+  const { state, refresh, refreshFailed, flash } = useBrandState(initial);
   const searchParams = useSearchParams();
   // Returning from checkout (?job=…) opens that job.
   const [tab, setTab] = useState<Tab>(() => (searchParams.get("job") ? "jobs" : "brief"));
@@ -220,6 +221,7 @@ export function BrandWorkspace({ initial }: { initial: BrandState }) {
   const tabs: { key: Tab; label: string; count?: number }[] = [
     { key: "brief", label: "Brief" },
     { key: "snapshot", label: "Snapshot" },
+    { key: "team", label: "Team" },
     { key: "jobs", label: "Jobs", count: state.jobs.filter((j) => !["cancelled", "accepted"].includes(j.status)).length },
   ];
 
@@ -246,8 +248,8 @@ export function BrandWorkspace({ initial }: { initial: BrandState }) {
             <ShareIcon />
             Share
           </button>
-          <button onClick={() => setMobilePanel(true)} className="flex min-h-9 items-center gap-1.5 rounded-lg border border-line-strong px-3 text-[13px] font-medium lg:hidden">
-            Brief
+          <button onClick={() => setMobilePanel(true)} aria-expanded={mobilePanel} aria-controls="brand-panel" className="flex min-h-9 items-center gap-1.5 rounded-lg border border-line-strong px-3 text-[13px] font-medium lg:hidden">
+            Brand panel
           </button>
         </div>
       </header>
@@ -309,27 +311,42 @@ export function BrandWorkspace({ initial }: { initial: BrandState }) {
 
         {/* Brand panel */}
         <aside
+          id="brand-panel"
           className={`${mobilePanel ? "flex" : "hidden"} min-h-0 w-full flex-col border-divider bg-panel lg:flex lg:w-[380px] lg:shrink-0 lg:border-l`}
           aria-label="Brand panel"
         >
-          <div className="flex items-center gap-1 px-6 pt-5" role="tablist">
-            <button onClick={() => setMobilePanel(false)} className="mr-1 text-[13px] text-ink-2 lg:hidden">
+          <div className="px-4 pt-3 lg:px-6 lg:pt-5">
+            <button onClick={() => setMobilePanel(false)} className="mb-1 min-h-10 text-[13px] text-ink-2 lg:hidden">
               ‹ Chat
             </button>
-            {tabs.map((t) => (
-              <button
-                key={t.key}
-                role="tab"
-                aria-selected={tab === t.key}
-                onClick={() => setTab(t.key)}
-                className={`rounded-lg px-2.5 py-1.5 text-[13px] ${tab === t.key ? "bg-tab font-medium text-ink" : "text-ink-3 hover:text-ink"}`}
-              >
-                {t.label}
-                {t.count ? <span className="ml-1.5 font-mono text-[11px] text-accent-text">{t.count}</span> : null}
-              </button>
-            ))}
+            <div className="flex flex-wrap items-center gap-1" role="tablist" aria-label="Brand workspace">
+              {tabs.map((t, index) => (
+                <button
+                  key={t.key}
+                  id={`brand-tab-${t.key}`}
+                  type="button"
+                  role="tab"
+                  aria-selected={tab === t.key}
+                  aria-controls="brand-tab-content"
+                  tabIndex={tab === t.key ? 0 : -1}
+                  onClick={() => setTab(t.key)}
+                  onKeyDown={(event) => {
+                    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+                    event.preventDefault();
+                    const offset = event.key === "ArrowRight" ? 1 : -1;
+                    const next = tabs[(index + offset + tabs.length) % tabs.length];
+                    setTab(next.key);
+                    event.currentTarget.parentElement?.querySelector<HTMLButtonElement>(`#brand-tab-${next.key}`)?.focus();
+                  }}
+                  className={`min-h-10 rounded-lg px-2.5 py-1.5 text-[13px] lg:min-h-0 ${tab === t.key ? "bg-tab font-medium text-ink" : "text-ink-3 hover:text-ink"}`}
+                >
+                  {t.label}
+                  {t.count ? <span className="ml-1.5 font-mono text-[11px] text-accent-text">{t.count}</span> : null}
+                </button>
+              ))}
+            </div>
           </div>
-          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-6 pt-[22px] pb-7" role="tabpanel">
+          <div id="brand-tab-content" className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 pt-[22px] pb-7 lg:px-6" role="tabpanel" aria-labelledby={`brand-tab-${tab}`}>
             {tab === "brief" && (
               <>
                 <ScoreCard
@@ -344,6 +361,7 @@ export function BrandWorkspace({ initial }: { initial: BrandState }) {
               </>
             )}
             {tab === "snapshot" && <SnapshotTab jobs={state.jobs} onNextStep={onNextStep} busy={busy} />}
+            {tab === "team" && <TeamTab state={state} onRefresh={refresh} onInvite={() => setShare("invite")} refreshFailed={refreshFailed} />}
             {tab === "jobs" && (
               <JobsTab
                 jobs={state.jobs}

@@ -24,6 +24,7 @@ import {
   quoteJob,
   updateJobSpec,
 } from "@/lib/services/jobs";
+import { addLaneTask, claimLane, releaseLane, setLaneTaskDone } from "@/lib/services/lanes";
 import { getCtx, requireCtx } from "@/lib/session";
 
 export type ActionResult<T = unknown> = { ok: true; data: T } | { ok: false; error: string };
@@ -119,6 +120,44 @@ export async function acceptInviteAction(token: string) {
   const ctx = await requireCtx(`/join/${token}`);
   const { brandId } = await acceptInvite(ctx, token);
   redirect(`/brands/${brandId}`);
+}
+
+// ---------- Lanes ----------
+
+const laneTarget = z.object({ brandId: z.uuid(), laneId: z.uuid() });
+const newLaneTask = laneTarget.extend({ title: z.string().trim().min(1).max(200) });
+const taskCompletion = z.object({ brandId: z.uuid(), taskId: z.uuid(), done: z.boolean() });
+
+export async function claimLaneAction(input: z.input<typeof laneTarget>) {
+  return wrap(async () => {
+    const ctx = await requireCtx();
+    const { brandId, laneId } = laneTarget.parse(input);
+    return (await claimLane(ctx, laneId, brandId)).id;
+  });
+}
+
+export async function releaseLaneAction(input: z.input<typeof laneTarget>) {
+  return wrap(async () => {
+    const ctx = await requireCtx();
+    const { brandId, laneId } = laneTarget.parse(input);
+    return (await releaseLane(ctx, laneId, brandId)).id;
+  });
+}
+
+export async function addLaneTaskAction(input: z.input<typeof newLaneTask>) {
+  return wrap(async () => {
+    const ctx = await requireCtx();
+    const { brandId, laneId, title } = newLaneTask.parse(input);
+    return (await addLaneTask(ctx, laneId, title, brandId)).id;
+  });
+}
+
+export async function setLaneTaskDoneAction(input: z.input<typeof taskCompletion>) {
+  return wrap(async () => {
+    const ctx = await requireCtx();
+    const { brandId, taskId, done } = taskCompletion.parse(input);
+    return (await setLaneTaskDone(ctx, taskId, done, brandId)).id;
+  });
 }
 
 // ---------- Jobs (founder) ----------
