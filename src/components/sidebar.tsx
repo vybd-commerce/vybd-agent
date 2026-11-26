@@ -70,7 +70,7 @@ export function Sidebar({
         </nav>
         <div className="flex flex-col gap-2.5 px-1.5">
           <Link href="/connect" className="text-[12px] text-ink-2">
-            Use Vybd in Claude or ChatGPT
+            Connect an assistant
           </Link>
           {isOperator && (
             <Link href="/ops" className="text-[12px] text-ink-2">

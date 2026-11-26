@@ -1,4 +1,5 @@
 import type { AutopilotView } from "@/lib/autopilot";
+import { hasConnectedAssistant } from "@/lib/oauth";
 import type { Ctx } from "./context";
 import { getBrand, listMembers } from "./brands";
 import { getBrandBrief } from "./brief";
@@ -7,16 +8,17 @@ import { getFeedback } from "./feedback";
 import { listJobs } from "./jobs";
 import { recordUnlock, scoreFrom } from "./score";
 
-/** Everything the three-column brand screen needs, in one read. */
+/** Everything the brand page needs, in one read. */
 export async function getBrandState(ctx: Ctx, brandId: string) {
   const brand = await getBrand(ctx, brandId);
   const conversation = await latestConversation(brandId, "web");
-  const [brief, jobs, feedback, messages, members] = await Promise.all([
+  const [brief, jobs, feedback, messages, members, hasAssistant] = await Promise.all([
     getBrandBrief(ctx, brandId),
     listJobs(ctx, brandId),
     getFeedback(ctx, brandId),
     conversation ? listMessages(ctx, conversation.id) : Promise.resolve([]),
     listMembers(brandId),
+    hasConnectedAssistant(ctx.userId),
   ]);
   const score = scoreFrom({
     fields: brief.fields,
@@ -39,6 +41,8 @@ export async function getBrandState(ctx: Ctx, brandId: string) {
     },
     // The viewer's own role decides which controls show (approve, share settings, reset invite).
     viewerId: ctx.userId,
+    // False until the viewer connects Claude, ChatGPT or another assistant; the page then points to /connect.
+    hasAssistant,
     viewerRole: brand.ownerId === ctx.userId ? ("owner" as const) : ("member" as const),
     members: members.map((m) => ({ userId: m.userId, name: m.name ?? m.email?.split("@")[0] ?? "Member", image: m.image, role: m.role })),
     brief,

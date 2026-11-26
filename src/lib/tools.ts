@@ -11,17 +11,17 @@ import { approveJob, getJob, listJobs, quoteJob, submitHostResult, type JobView 
 import { addLaneTask, claimLane, listLanes, releaseLane, setLaneTaskDone } from "@/lib/services/lanes";
 
 /**
- * One tool table backs every surface: our web orchestrator calls these as Anthropic tools,
- * and the MCP server exposes the same names, schemas and handlers to Claude, ChatGPT or any agent.
+ * The tool table the MCP server exposes to Claude, ChatGPT or any agent. Vybd has no chat of its own:
+ * the founder's assistant is the only caller. `surface` stays so a second surface can be added later.
  */
-export type ToolSurface = "web" | "mcp";
+export type ToolSurface = "mcp";
 export type ToolContext = { ctx: Ctx; surface: ToolSurface };
 
 type ToolDef<S extends z.ZodObject, R> = {
   name: string;
   description: string;
   input: S;
-  /** Tools scoped to one brand get brandId injected by the web orchestrator. */
+  /** Tools that act on one brand (they take brandId). */
   brandScoped?: boolean;
   /** Limit a tool to some surfaces. Default: all. */
   surfaces?: ToolSurface[];
@@ -44,11 +44,11 @@ function oneLine(title: string) {
 }
 
 function sourceFor(surface: ToolSurface): BriefSource {
-  return surface === "mcp" ? "mcp" : "chat";
+  return surface;
 }
 
 /** Strip internals the model doesn't need (events can be long). */
-function summarizeJob(job: JobView, surface: ToolSurface = "web") {
+function summarizeJob(job: JobView, surface: ToolSurface) {
   const def = jobType(job.type);
   const task = surface === "mcp" && job.awaitingHost && def.researchTask ? def.researchTask(job.spec as never) : null;
   return {
@@ -74,8 +74,6 @@ function summarizeJob(job: JobView, surface: ToolSurface = "web") {
         ...task,
       },
     }),
-    ...(surface === "web" &&
-      job.awaitingHost && { note: "This job runs in the founder's connected assistant (Claude or Codex), not here." }),
   };
 }
 

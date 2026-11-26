@@ -210,6 +210,15 @@ export async function verifyAccessToken(bearer: string | null) {
 }
 
 /** Sweep expired OAuth rows and old rate-limit windows. Safe to run any time; the worker runs it daily. */
+/** True once the user has connected an assistant (any token not revoked; refresh tokens keep it alive). */
+export async function hasConnectedAssistant(userId: string) {
+  const row = await db.query.oauthTokens.findFirst({
+    columns: { id: true },
+    where: and(eq(schema.oauthTokens.userId, userId), isNull(schema.oauthTokens.revokedAt)),
+  });
+  return Boolean(row);
+}
+
 export async function cleanupExpired() {
   await db.execute(sql`delete from oauth_codes where expires_at < now()`);
   // Refresh tokens live 30 days from issue; rotated (revoked) rows are dead at once.

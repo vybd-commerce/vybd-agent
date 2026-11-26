@@ -37,11 +37,6 @@ describe("market snapshot on the founder's assistant", () => {
     const claimed = await claimNextAgentJob();
     expect(claimed?.id).not.toBe(quoted.id);
 
-    // Web surface: no research task, and no submit tool.
-    const web = await runTool("get_job", { jobId: quoted.id }, { ctx, surface: "web" });
-    expect((web as { result: Record<string, unknown> }).result.researchTask).toBeUndefined();
-    expect((await runTool("submit_job_result", { jobId: quoted.id, result: {} }, { ctx, surface: "web" })).ok).toBe(false);
-
     // Strangers can't deliver it; a bad result comes back as a fixable error.
     expect((await runTool("submit_job_result", { jobId: quoted.id, result: DEMO_SNAPSHOT }, { ctx: other, surface: "mcp" })).ok).toBe(false);
     const bad = await runTool("submit_job_result", { jobId: quoted.id, result: { competitors: [] } }, { ctx, surface: "mcp" });

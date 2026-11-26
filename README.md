@@ -2,7 +2,7 @@
 
 Build a physical-product brand with your own AI agent. Vybd handles the supply chain. Part of [Vybd](https://www.vybd.ai).
 
-Self-serve Vybd: founders shape a brand idea into a living Brand Brief through conversation, then buy real work on it (market snapshot, find suppliers) from Vybd agents backed by human operators. The same service layer powers the web chat and a remote MCP server, so a brief started in Claude or ChatGPT shows up live in the web app.
+Self-serve Vybd: founders shape a brand idea into a living Brand Brief with the AI assistant they already use (Claude, ChatGPT, Gemini CLI, Claude Code, Codex, Cursor) over a remote MCP server, then buy real work on it (market snapshot, find suppliers) from Vybd agents backed by human operators. Vybd runs no chat of its own: the web app is the brand page (brief, jobs, activity, team), onboarding at /connect, share pages and the ops console, and it updates live while the assistant works.
 
 ## Run it
 
@@ -29,10 +29,10 @@ Checks: `pnpm typecheck`, `pnpm lint`, `pnpm test` (uses a `vybd_agent_test` dat
 ## How it fits together
 
 ```
- Web chat (/brands/[id])      MCP clients (Claude, ChatGPT)       Ops console (/ops)      Worker
-        │  POST /api/chat             │  /api/mcp + OAuth                 │ server actions        │
+ Brand page (/brands/[id])    MCP clients (Claude, ChatGPT, …)    Ops console (/ops)      Worker
+        │  server actions             │  /api/mcp + OAuth                 │ server actions        │
         ▼                             ▼                                   ▼                       ▼
-  orchestrator (Claude) ──►  src/lib/tools.ts  (one tool table)  ◄──────────────────────── job registry
+  services (direct)          src/lib/tools.ts  (one tool table)  ◄──────────────────────── job registry
                                       │
                                       ▼
                     src/lib/services/*   ← the only code that touches the database
@@ -42,9 +42,9 @@ Checks: `pnpm typecheck`, `pnpm lint`, `pnpm test` (uses a `vybd_agent_test` dat
 
 - `src/lib/brief.ts`: the frozen v1 brief schema (one-liner, customer, problem, positioning, price, channels, name directions, open questions). Usable = one-liner + customer + positioning.
 - `src/lib/services/`: brands, versioned briefs (every write is a new `brief_versions` row with its source: chat, job, user_edit, mcp), conversations, jobs (state machine + events), share page and feedback. Every change NOTIFYs the brand's channel so all open surfaces update without reload.
-- `src/lib/tools.ts`: `list_brands`, `create_brand`, `get_brand_brief`, `update_brand_brief`, `quote_job`, `approve_job`, `get_job`, `list_jobs`, `create_share_page`, `get_feedback`. Used verbatim by the web orchestrator and the MCP server.
-- `src/lib/agent/`: orchestrator system prompt and interview script (`prompts.ts`), streaming tool loop (`orchestrator.ts`). The web agent also gets UI-only tools for quick-reply chips and next-step cards.
-- `src/lib/jobs/`: job types. Each declares spec and result schemas, a quote, progress steps, an operator delivery form, an optional agent `run()`, and the chat summary posted on delivery. Add a type here and it works in chat, MCP, the worker and the ops console.
+- `src/lib/tools.ts`: `list_brands`, `create_brand`, `get_brand_brief`, `update_brand_brief`, `quote_job`, `approve_job`, `get_job`, `list_jobs`, `create_share_page`, `get_feedback`. Exposed by the MCP server.
+- `src/lib/agent/prompts.ts`: the interview script and jobs guide, served to assistants through the MCP prompts.
+- `src/lib/jobs/`: job types. Each declares spec and result schemas, a quote, progress steps, an operator delivery form, an optional agent `run()`, and the summary posted to the brand's activity on delivery. Add a type here and it works over MCP, in the worker and the ops console.
 - `src/lib/mcp/` + `src/lib/oauth.ts`: Streamable HTTP MCP server with OAuth 2.1 (dynamic client registration, PKCE S256, refresh rotation). Signing in during OAuth creates the Vybd account if needed.
 
 Job lifecycle: `draft → quoted → approved → in_progress → delivered → accepted` (plus `cancelled`, `failed`). Free jobs start on approval; paid jobs return a checkout link and start only when payment is confirmed. If the agent fails, the job lands in the ops queue and an operator can deliver it by hand.

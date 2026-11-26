@@ -1,11 +1,10 @@
 import { redirect } from "next/navigation";
-import { listBrands, createBrand } from "@/lib/services/brands";
+import { listBrands } from "@/lib/services/brands";
 import { requireCtx } from "@/lib/session";
 
-/** Land on the most recent brand, or a fresh empty one for new users. */
+/** Land on the most recent brand. New users start at /connect: their assistant creates the first brand. */
 export default async function Home() {
   const ctx = await requireCtx("/");
   const brands = await listBrands(ctx);
-  const brand = brands[0] ?? (await createBrand(ctx, {}));
-  redirect(`/brands/${brand.id}`);
+  redirect(brands[0] ? `/brands/${brands[0].id}` : "/connect");
 }

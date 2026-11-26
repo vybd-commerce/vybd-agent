@@ -7,7 +7,7 @@ import { z } from "zod";
 import { REFERRAL_COOKIE, signIn, signOut } from "@/auth";
 import { INVITE_COOKIE, approveWaitlist } from "@/lib/services/beta";
 import { briefFieldsSchema, type BriefFieldKey } from "@/lib/brief";
-import { createBrand, renameBrand, setShareSettings } from "@/lib/services/brands";
+import { renameBrand, setShareSettings } from "@/lib/services/brands";
 import { updateBrandBrief } from "@/lib/services/brief";
 import { createSharePage, feedbackInputSchema, submitFeedback } from "@/lib/services/feedback";
 import { acceptInvite, getOrCreateInvite, resetInvite } from "@/lib/services/invites";
@@ -80,10 +80,10 @@ export async function signOutAction() {
 
 // ---------- Brands ----------
 
+/** Brands are started from the founder's assistant (create_brand over MCP), not from an empty web form. */
 export async function newBrandAction() {
-  const ctx = await requireCtx();
-  const brand = await createBrand(ctx, {});
-  redirect(`/brands/${brand.id}`);
+  await requireCtx();
+  redirect("/connect?new=1");
 }
 
 export async function renameBrandAction(brandId: string, name: string) {

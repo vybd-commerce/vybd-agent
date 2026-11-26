@@ -27,7 +27,7 @@ export default async function LoginPage({ searchParams }: PageProps<"/login">) {
               ? emailIsConsole
                 ? "We sent you a sign-in link. In development it is printed in the server log."
                 : "We sent you a sign-in link. It works for one hour."
-              : "Vybd is in private beta. Sign in to shape a brand and keep its brief in one place."}
+              : "Vybd is in private beta. It works inside Claude, ChatGPT and the AI tools you already use. Sign in once, then connect your assistant."}
         </p>
         {failed && (
           <p role="alert" className="mt-4 rounded-lg bg-subtle px-3 py-2 text-[13px] text-ink-2">

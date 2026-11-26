@@ -240,7 +240,7 @@ export function BriefTab({
       </div>
 
       {brief.version === 0 && !showEmpty ? (
-        <p className="text-ink-3">The brief fills in here as you talk: one-liner, customer, positioning, price and more.</p>
+        <p className="text-ink-3">The brief fills in here while your assistant interviews you: one-liner, customer, positioning, price and more.</p>
       ) : (
         <dl className="m-0 flex flex-col gap-3">
           {BRIEF_FIELDS.filter((k) => !PAIRED.includes(k) && visible(k) && BRIEF_FIELDS.indexOf(k) < BRIEF_FIELDS.indexOf("price")).map(field)}

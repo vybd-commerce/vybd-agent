@@ -66,7 +66,7 @@ function QuestRow({ q, fresh, onAct, busy }: { q: Quest; fresh: boolean; onAct: 
               onClick={() => onAct(q)}
               className="mt-1.5 text-[12px] font-medium text-accent-text hover:underline disabled:opacity-50"
             >
-              {q.action === "invite" ? "Invite someone" : q.action === "share" ? "Share the page" : "Work on this"} →
+              {q.action === "invite" ? "Invite someone" : q.action === "share" ? "Share the page" : "Ask your assistant"} →
             </button>
           )}
         </div>
@@ -139,7 +139,7 @@ export function ScoreCard({
               onClick={() => act(score.next!)}
               className="mt-1.5 text-[12px] font-medium text-accent-text hover:underline disabled:opacity-50"
             >
-              Start →
+              {score.next.action ? "Start" : "Ask your assistant"} →
             </button>
           )}
         </div>

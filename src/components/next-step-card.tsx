@@ -1,6 +1,6 @@
 import type { NextStep } from "@/lib/types";
 
-/** Next-step card: title, one line, chevron. Opens the job flow in chat. */
+/** Next-step card: title, one line, chevron. Picking it copies a prompt for the founder's own assistant. */
 export function NextStepCard({ step, onPick, disabled }: { step: NextStep; onPick: (s: NextStep) => void; disabled?: boolean }) {
   return (
     <button
