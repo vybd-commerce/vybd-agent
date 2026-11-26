@@ -8,11 +8,11 @@ afterAll(async () => {
 
 describe("runTick", () => {
   it("claims nothing once the budget is spent", async () => {
-    expect(await runTick({ budgetMs: 0 })).toEqual({ ran: 0, budgetSpent: true });
+    expect(await runTick({ budgetMs: 0 })).toEqual({ ran: 0, budgetSpent: true, yielded: 0, nextWaitMs: null });
   });
 
   it("stops at maxJobs", async () => {
-    expect(await runTick({ maxJobs: 0 })).toEqual({ ran: 0, budgetSpent: false });
+    expect(await runTick({ maxJobs: 0 })).toEqual({ ran: 0, budgetSpent: false, yielded: 0, nextWaitMs: null });
   });
 });
 
@@ -43,6 +43,39 @@ describe("POST /api/internal/tick", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ran: 0, budgetSpent: false });
     vi.doUnmock("@/worker/tick");
+    vi.unstubAllEnvs();
+  });
+});
+
+describe("chainTick", () => {
+  const yielded = { ran: 1, budgetSpent: false, yielded: 1, nextWaitMs: 0 };
+
+  it("starts the next tick when a job yielded, with the depth header", async () => {
+    vi.stubEnv("CRON_SECRET", "s3cret");
+    vi.stubEnv("APP_URL", "https://agent.test/");
+    const fetchMock = vi.fn(async () => new Response("ok"));
+    vi.stubGlobal("fetch", fetchMock);
+    const { chainTick, TICK_DEPTH_HEADER } = await import("@/lib/worker-wake");
+    expect(await chainTick(yielded, 3)).toBe(true);
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("https://agent.test/api/internal/tick");
+    expect(init.headers).toMatchObject({ authorization: "Bearer s3cret", [TICK_DEPTH_HEADER]: "4" });
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  it("does nothing without a yield, past the depth cap, or without a secret", async () => {
+    vi.stubEnv("APP_URL", "https://agent.test");
+    const fetchMock = vi.fn(async () => new Response("ok"));
+    vi.stubGlobal("fetch", fetchMock);
+    const { chainTick, MAX_TICK_CHAIN } = await import("@/lib/worker-wake");
+    vi.stubEnv("CRON_SECRET", "s3cret");
+    expect(await chainTick({ ...yielded, yielded: 0 }, 0)).toBe(false);
+    expect(await chainTick(yielded, MAX_TICK_CHAIN)).toBe(false);
+    vi.stubEnv("CRON_SECRET", "");
+    expect(await chainTick(yielded, 0)).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
     vi.unstubAllEnvs();
   });
 });

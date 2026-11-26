@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { db, schema, sql } from "@/db";
 import { builder, fromSections, resetFakeBuilder, toSections, type FakeBuilder } from "@/lib/builder/client";
 import { jobType } from "@/lib/jobs/registry";
+import { JobYield } from "@/lib/jobs/yield";
 import { createBrand } from "@/lib/services/brands";
 import { getBrandBrief, updateBrandBrief } from "@/lib/services/brief";
 import type { Ctx } from "@/lib/services/context";
@@ -125,6 +126,48 @@ describe("brand_research job", () => {
     const brief = await getBrandBrief(ctx, brand.id);
     expect(brief.fields.positioning).toBe("The gentle daily ritual for thinning hair");
     expect([...fake.proposals.values()][0].status).toBe("accepted");
+  });
+});
+
+describe("brand_research on a serverless host", () => {
+  it("yields before its deadline and resumes the same builder run", async () => {
+    const brand = await createBrand(ctx, { name: "Sliced" });
+    await updateBrandBrief(ctx, brand.id, COMPLETE, "chat");
+    const def = jobType("brand_research");
+    const steps: string[] = [];
+    let state: Record<string, unknown> | null = null;
+    const helpers = (deadlineAt: number) => ({
+      brandId: brand.id,
+      brief: COMPLETE,
+      progress: async (s: string) => void steps.push(s),
+      state,
+      saveState: async (s: Record<string, unknown>) => void (state = s),
+      deadlineAt,
+    });
+
+    // Too little time left to advance: submit, save the run id, hand back.
+    await expect(def.run!({}, helpers(Date.now() + 1_000))).rejects.toBeInstanceOf(JobYield);
+    expect(state).toMatchObject({ builderRunId: expect.any(String) });
+    const runId = (state as unknown as { builderRunId: string }).builderRunId;
+
+    // Next tick: plenty of time; the same run finishes, no second run is submitted.
+    const result = await def.run!({}, helpers(Date.now() + 280_000));
+    expect(result.builderRunId).toBe(runId);
+    expect(fake.runs.size).toBe(1);
+    expect(steps).toEqual(["understand", "market_scan", "customer_insight", "opportunities", "focus_plan", "report"]);
+  });
+
+  it("yields with a wait when the builder makes no progress", async () => {
+    const brand = await createBrand(ctx, { name: "Busy" });
+    await updateBrandBrief(ctx, brand.id, COMPLETE, "chat");
+    const stuck = vi.spyOn(fake, "advanceRun").mockImplementation(async (_a, runId) => ({ id: runId, status: "running", completedSteps: [], error: null }));
+    const def = jobType("brand_research");
+    const err = await def
+      .run!({}, { brandId: brand.id, brief: COMPLETE, progress: async () => {}, state: null, saveState: async () => {}, deadlineAt: Date.now() + 280_000 })
+      .catch((e) => e);
+    expect(err).toBeInstanceOf(JobYield);
+    expect((err as JobYield).waitMs).toBeGreaterThan(0);
+    stuck.mockRestore();
   });
 });
 

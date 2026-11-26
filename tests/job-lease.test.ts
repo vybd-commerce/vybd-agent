@@ -11,6 +11,8 @@ import {
   quoteJob,
   releaseAgentLease,
   renewAgentLease,
+  saveAgentState,
+  yieldAgentJob,
 } from "@/lib/services/jobs";
 
 let ctx: Ctx;
@@ -89,5 +91,31 @@ describe("agent job lease", () => {
     expect(await claimAll()).not.toContain(id);
     await failAbandonedAgentJobs();
     expect((await row(id)).status).toBe("in_progress");
+  });
+
+  it("a yielded job waits, keeps its state, and is not counted as interrupted", async () => {
+    const id = await workerJob();
+    expect(await claimAll()).toContain(id);
+    await saveAgentState(id, { builderRunId: "r1" });
+    await yieldAgentJob(id, 60_000);
+    let r = await row(id);
+    expect(r.agentAttempts).toBe(0);
+    expect(r.agentLeaseExpiresAt).toBeNull();
+    expect(await claimAll()).not.toContain(id); // still waiting
+
+    await db.update(schema.jobs).set({ agentWaitUntil: dsql`now() - interval '1 second'` as unknown as Date }).where(eq(schema.jobs.id, id));
+    expect(await claimAll()).toContain(id);
+    r = await row(id);
+    expect(r.agentAttempts).toBe(1);
+    expect(r.agentState).toEqual({ builderRunId: "r1" });
+    const events = await db.query.jobEvents.findMany({ where: eq(schema.jobEvents.jobId, id) });
+    expect(events.some((e) => e.payload.note === "Resuming after an interrupted run")).toBe(false);
+
+    // Yields never use up attempts, however many there are.
+    for (let i = 0; i < MAX_AGENT_ATTEMPTS + 1; i++) {
+      await yieldAgentJob(id, 0);
+      expect(await claimAll()).toContain(id);
+    }
+    expect((await row(id)).agentAttempts).toBe(1);
   });
 });

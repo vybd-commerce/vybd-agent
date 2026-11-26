@@ -26,7 +26,12 @@ export const SECTION_OF: Record<BriefFieldKey, string> = {
   nameDirections: "name_directions",
   openQuestions: "open_questions",
 };
-const FIELD_OF = Object.fromEntries(Object.entries(SECTION_OF).map(([f, s]) => [s, f])) as Record<string, BriefFieldKey>;
+// The builder stores product_price in its `product` section; older builders return product/price as-is.
+const FIELD_OF = {
+  ...Object.fromEntries(Object.entries(SECTION_OF).map(([f, s]) => [s, f])),
+  product: "price",
+  price: "price",
+} as Record<string, BriefFieldKey>;
 
 export function toSections(fields: BriefFields): Record<string, string | string[]> {
   const out: Record<string, string | string[]> = {};
@@ -34,11 +39,16 @@ export function toSections(fields: BriefFields): Record<string, string | string[
   return out;
 }
 
+// The builder keeps one claim per item and returns a lone claim as a string, several as a list.
+const LIST_FIELDS = new Set<BriefFieldKey>(["competitors", "channels", "nameDirections", "openQuestions"]);
+
 export function fromSections(sections: Record<string, unknown>): BriefFields {
   const out: Record<string, unknown> = {};
   for (const [s, v] of Object.entries(sections)) {
     const f = FIELD_OF[s];
-    if (f && isFilled(v)) out[f] = v;
+    if (!f || !isFilled(v)) continue;
+    if (LIST_FIELDS.has(f)) out[f] = Array.isArray(v) ? v : [v];
+    else out[f] = Array.isArray(v) ? v.join("\n") : v;
   }
   return out as BriefFields;
 }
@@ -62,6 +72,8 @@ export interface BuilderApi {
   submitRun(actAs: string, brandId: string): Promise<BuilderRun>;
   /** GET /v1/runs/{id} */
   getRun(actAs: string, runId: string): Promise<BuilderRun>;
+  /** POST /v1/runs/{id}/advance: the builder runs this run's next phases for up to `budgetS`, then returns it. */
+  advanceRun(actAs: string, runId: string, budgetS: number): Promise<BuilderRun>;
   /** GET /v1/runs/{id}/report */
   getReport(actAs: string, runId: string): Promise<string>;
   /** GET /v1/brands/{id}/proposals?status=pending, filtered to one run. */
@@ -110,7 +122,7 @@ export function resetFakeBuilder() {
 
 type Envelope<T> = { ok: boolean; data: T; errors?: { code: string; message: string }[] };
 
-async function call<T>(method: string, path: string, opts: { actAs?: string; body?: unknown } = {}): Promise<T> {
+async function call<T>(method: string, path: string, opts: { actAs?: string; body?: unknown; timeoutMs?: number } = {}): Promise<T> {
   const base = process.env.BUILDER_API_URL!.replace(/\/$/, "");
   let res: Response;
   try {
@@ -122,7 +134,7 @@ async function call<T>(method: string, path: string, opts: { actAs?: string; bod
         ...(opts.actAs ? { "x-vybd-act-as": opts.actAs } : {}),
       },
       body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
-      signal: AbortSignal.timeout(30_000),
+      signal: AbortSignal.timeout(opts.timeoutMs ?? 30_000),
     });
   } catch (err) {
     throw new BuilderError(`Brand Builder unreachable: ${err instanceof Error ? err.message : String(err)}`, 0, "unreachable");
@@ -173,18 +185,24 @@ const httpBuilder: BuilderApi = {
   async getRun(actAs, runId) {
     return toRun(await call<{ run: RunOut }>("GET", `/v1/runs/${runId}`, { actAs }).then((d) => d.run));
   },
+  async advanceRun(actAs, runId, budgetS) {
+    const path = `/v1/runs/${runId}/advance?budget_s=${Math.floor(budgetS)}`;
+    // The builder works for up to budgetS before answering; allow for its cold start too.
+    return toRun(await call<{ run: RunOut }>("POST", path, { actAs, timeoutMs: (budgetS + 30) * 1000 }).then((d) => d.run));
+  },
   async getReport(actAs, runId) {
     return (await call<{ report_md: string }>("GET", `/v1/runs/${runId}/report`, { actAs })).report_md;
   },
   async listProposals(actAs, brandId, runId) {
-    const d = await call<{ proposals: { id: string; section: string; value: string | string[]; rationale?: string; origin_ref?: string }[] }>(
+    const d = await call<{ proposals: { id: string; section: string; field?: string; value: string | string[]; rationale?: string; origin_ref?: string }[] }>(
       "GET",
       `/v1/brands/${brandId}/proposals?status=pending`,
       { actAs },
     );
     return d.proposals
-      .filter((p) => p.origin_ref === runId && FIELD_OF[p.section])
-      .map((p) => ({ id: String(p.id), field: FIELD_OF[p.section], value: p.value, rationale: p.rationale ?? "" }));
+      .map((p) => ({ ...p, key: FIELD_OF[p.field ?? p.section] }))
+      .filter((p) => p.origin_ref === runId && p.key)
+      .map((p) => ({ id: String(p.id), field: p.key, value: p.value, rationale: p.rationale ?? "" }));
   },
   async acceptProposal(actAs, brandId, proposalId) {
     await call("POST", `/v1/brands/${brandId}/proposals/${proposalId}/accept`, { actAs });
@@ -277,6 +295,9 @@ export class FakeBuilder implements BuilderApi {
     }
     this.save();
     return { id: runId, status: done ? ("completed" as const) : ("running" as const), completedSteps: RUN_STEPS.slice(0, r.polls), error: null };
+  }
+  async advanceRun(actAs: string, runId: string) {
+    return this.getRun(actAs, runId);
   }
   async getReport() {
     return process.env.VYBD_DEMO === "1" ? DEMO_REPORT : "# Brand research\n\nFake report.";

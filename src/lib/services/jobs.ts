@@ -370,10 +370,12 @@ export async function applyProposedEdit(ctx: Ctx, messageId: string, index: numb
   if (!edit) throw new NotFoundError("Edit not found");
   if (edit.applied) return msg;
   if (edit.builderProposalId) {
-    // Accepting in the builder applies it there; pulling brings it into the cache and the live brief.
+    // Accept in the builder so it records the decision, then write the patch like any other edit: the
+    // builder adds an accepted proposal to its section, while an edit here replaces the field.
     const { actAs, builderBrandId } = await ensureBuilderBrand(conv!.brandId);
     await builder().acceptProposal(actAs, builderBrandId, edit.builderProposalId);
     await pullBrief(conv!.brandId);
+    await updateBrandBrief(ctx, conv!.brandId, briefFieldsSchema.parse(edit.patch), "job");
   } else {
     await updateBrandBrief(ctx, conv!.brandId, briefFieldsSchema.parse(edit.patch), "job");
   }
@@ -404,6 +406,7 @@ export async function claimNextAgentJob(): Promise<Job | null> {
       where status = 'in_progress' and fulfiller in ('agent', 'hybrid')
         and (agent_claimed_at is null
           or (agent_lease_expires_at < now() and agent_attempts < ${MAX_AGENT_ATTEMPTS}))
+        and (agent_wait_until is null or agent_wait_until <= now())
       order by created_at
       for update skip locked
       limit 1
@@ -425,6 +428,25 @@ export async function renewAgentLease(jobId: string) {
 /** The worker is done with the job (delivered, failed, or a hybrid draft handed to ops): never re-run it. */
 export async function releaseAgentLease(jobId: string) {
   await db.update(schema.jobs).set({ agentLeaseExpiresAt: null }).where(eq(schema.jobs.id, jobId));
+}
+
+/**
+ * The running job handed itself back (JobYield): free the claim so any worker can take it after `waitMs`.
+ * Attempts reset, since a yield is planned, not an interruption.
+ */
+export async function yieldAgentJob(jobId: string, waitMs: number) {
+  await db.execute(dsql`
+    update jobs set
+      agent_claimed_at = null,
+      agent_lease_expires_at = null,
+      agent_attempts = 0,
+      agent_wait_until = now() + make_interval(secs => ${Math.max(0, waitMs) / 1000})
+    where id = ${jobId} and status = 'in_progress'`);
+}
+
+/** Resume state for a job that yields (see JobYield). */
+export async function saveAgentState(jobId: string, state: Record<string, unknown>) {
+  await db.update(schema.jobs).set({ agentState: state }).where(eq(schema.jobs.id, jobId));
 }
 
 /** Jobs whose worker died mid-run on every attempt go to the ops queue as failed. Returns how many. */

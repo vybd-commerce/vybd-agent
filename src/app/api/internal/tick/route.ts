@@ -1,5 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
+import { after } from "next/server";
 import { reportError } from "@/lib/monitoring";
+import { chainTick, TICK_DEPTH_HEADER } from "@/lib/worker-wake";
 import { runTick } from "@/worker/tick";
 
 // Vercel Hobby caps functions at 300 s. runTick stops claiming new jobs after TICK_BUDGET_MS.
@@ -23,6 +25,8 @@ export async function POST(req: Request) {
   try {
     const result = await runTick({ budgetMs: TICK_BUDGET_MS });
     if (result.ran) console.log("[worker] tick", result);
+    const depth = Number(req.headers.get(TICK_DEPTH_HEADER) ?? 0) || 0;
+    if (result.yielded) after(() => chainTick(result, depth));
     return Response.json(result);
   } catch (err) {
     console.error("[worker] tick failed", err);

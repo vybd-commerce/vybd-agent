@@ -28,24 +28,43 @@ async function maybeCleanup() {
   }
 }
 
-export type TickResult = { ran: number; budgetSpent: boolean };
+/**
+ * `yielded`: jobs that handed themselves back to wait (JobYield). `nextWaitMs`: the shortest such wait,
+ * so the caller can chain another tick once it has passed instead of leaving the job to the next cron.
+ */
+export type TickResult = { ran: number; budgetSpent: boolean; yielded: number; nextWaitMs: number | null };
+
+/** Serverless functions are killed at 300 s; a job must hand back before this, measured from tick start. */
+export const TICK_HARD_LIMIT_MS = 280_000;
 
 /**
  * Run claimed jobs until the queue is empty or `budgetMs` has passed.
  * `maxJobs` caps a single pass (the long-running worker passes 1 so it can check for shutdown between jobs).
  */
-export async function runTick({ budgetMs = Infinity, maxJobs = Infinity }: { budgetMs?: number; maxJobs?: number } = {}): Promise<TickResult> {
+export async function runTick({
+  budgetMs = Infinity,
+  maxJobs = Infinity,
+  hardLimitMs = Number.isFinite(budgetMs) ? TICK_HARD_LIMIT_MS : Infinity,
+}: { budgetMs?: number; maxJobs?: number; hardLimitMs?: number } = {}): Promise<TickResult> {
   const started = Date.now();
+  const deadlineAt = started + hardLimitMs;
   let ran = 0;
+  let yielded = 0;
+  let nextWaitMs: number | null = null;
+  const done = (budgetSpent: boolean): TickResult => ({ ran, budgetSpent, yielded, nextWaitMs });
   const abandoned = await failAbandonedAgentJobs();
   if (abandoned) console.log(`[worker] ${abandoned} interrupted job(s) sent to ops`);
   while (ran < maxJobs) {
-    if (Date.now() - started >= budgetMs) return { ran, budgetSpent: true };
+    if (Date.now() - started >= budgetMs) return done(true);
     const job = await claimNextAgentJob();
     await maybeCleanup();
     if (!job) break;
-    await runJob(job);
+    const outcome = await runJob(job, { deadlineAt });
+    if (outcome.yielded) {
+      yielded++;
+      nextWaitMs = Math.min(nextWaitMs ?? Infinity, outcome.waitMs);
+    }
     ran++;
   }
-  return { ran, budgetSpent: false };
+  return done(false);
 }

@@ -1,15 +1,37 @@
 import { z } from "zod";
 import { BRIEF_LABELS, briefFieldsSchema } from "@/lib/brief";
-import { builder, builderEnabled, RUN_STEPS } from "@/lib/builder/client";
+import { builder, builderEnabled, RUN_STEPS, type BuilderRun } from "@/lib/builder/client";
 import { InvalidStateError } from "@/lib/services/context";
 import { ensureBuilderBrand } from "@/lib/services/builder-sync";
 import { PRICES } from "./prices";
-import type { JobTypeDef } from "./types";
+import type { AgentRunHelpers, JobTypeDef } from "./types";
+import { JobYield } from "./yield";
 
 // Deep research done by the Brand Builder's runner on the canonical brief. The agent only starts the
 // run, relays its progress and turns the builder's proposals into one-tap brief edits.
+//
+// The agent drives the run: each `advanceRun` call has the builder work for up to ADVANCE_BUDGET_S.
+// On a serverless host the job yields before its invocation's deadline and the next tick resumes it
+// from the saved run id, so a run of many minutes never sits inside one 300 s function.
 
 const MAX_WAIT_MS = 45 * 60_000;
+/** Longest the builder works per advance call (the builder caps it at 200 s). */
+const ADVANCE_BUDGET_S = 180;
+/** Smallest advance worth making (about one builder phase); with less time left the job yields instead. */
+const MIN_ADVANCE_S = 90;
+/** Time kept back after the last advance to fetch the report and deliver. */
+const HANDBACK_MARGIN_MS = 30_000;
+/** Wait before retrying when an advance made no progress (another builder worker holds the run). */
+const BUSY_WAIT_MS = 20_000;
+
+const researchStateSchema = z.object({
+  builderRunId: z.string(),
+  submittedAt: z.number(),
+  reported: z.array(z.string()).default([]),
+});
+type ResearchState = z.infer<typeof researchStateSchema>;
+
+const isTerminal = (run: BuilderRun) => run.status === "completed" || run.status === "failed" || run.status === "cancelled";
 
 const STEP_LABELS: Record<(typeof RUN_STEPS)[number], string> = {
   understand: "Brief understood",
@@ -38,24 +60,47 @@ export const researchResultSchema = z.object({
 });
 export type ResearchResult = z.infer<typeof researchResultSchema>;
 
-async function runResearch(brandId: string, progress: (step: string, note: string) => Promise<void>): Promise<ResearchResult> {
+async function runResearch(helpers: AgentRunHelpers): Promise<ResearchResult> {
+  const { brandId, progress } = helpers;
+  const deadlineAt = helpers.deadlineAt ?? Infinity;
   const { actAs, builderBrandId } = await ensureBuilderBrand(brandId);
-  let run = await builder().submitRun(actAs, builderBrandId);
-  const reported = new Set<string>();
-  const deadline = Date.now() + MAX_WAIT_MS;
+
+  // Resume the run an earlier invocation started; never submit a second one.
+  const saved = researchStateSchema.safeParse(helpers.state ?? null);
+  let state: ResearchState;
+  let run: BuilderRun;
+  if (saved.success) {
+    state = saved.data;
+    run = await builder().getRun(actAs, state.builderRunId);
+  } else {
+    run = await builder().submitRun(actAs, builderBrandId);
+    state = { builderRunId: run.id, submittedAt: Date.now(), reported: [] };
+    await helpers.saveState?.(state);
+  }
+
   while (true) {
-    for (const step of run.completedSteps) {
-      if (reported.has(step)) continue;
-      reported.add(step);
-      await progress(step, STEP_LABELS[step as keyof typeof STEP_LABELS] ?? step);
+    const fresh = run.completedSteps.filter((s) => !state.reported.includes(s));
+    for (const step of fresh) await progress(step, STEP_LABELS[step as keyof typeof STEP_LABELS] ?? step);
+    if (fresh.length) {
+      state = { ...state, reported: [...state.reported, ...fresh] };
+      await helpers.saveState?.(state);
     }
     if (run.status === "completed") break;
     if (run.status === "failed" || run.status === "cancelled") {
       throw new Error(`Brand Builder run ${run.id} ${run.status}${run.error ? `: ${run.error}` : ""}`);
     }
-    if (Date.now() > deadline) throw new Error(`Brand Builder run ${run.id} still ${run.status} after 45 minutes`);
-    await new Promise((r) => setTimeout(r, Number(process.env.BUILDER_POLL_MS ?? 5000)));
-    run = await builder().getRun(actAs, run.id);
+    if (Date.now() > state.submittedAt + MAX_WAIT_MS) throw new Error(`Brand Builder run ${run.id} still ${run.status} after 45 minutes`);
+
+    const budgetS = Math.min(ADVANCE_BUDGET_S, (deadlineAt - Date.now() - HANDBACK_MARGIN_MS) / 1000);
+    if (budgetS < MIN_ADVANCE_S) throw new JobYield(0, "the builder run continues in the next tick");
+    const before = run.completedSteps.length;
+    run = await builder().advanceRun(actAs, run.id, budgetS);
+    if (run.completedSteps.length === before && !isTerminal(run)) {
+      // No progress: another builder worker holds the run (or a phase outlasted the budget).
+      if (Number.isFinite(deadlineAt)) throw new JobYield(BUSY_WAIT_MS, "the builder run is busy");
+      await new Promise((r) => setTimeout(r, Number(process.env.BUILDER_POLL_MS ?? 5000)));
+      run = await builder().getRun(actAs, run.id);
+    }
   }
   const [reportMd, proposals] = await Promise.all([
     builder().getReport(actAs, run.id),
@@ -97,7 +142,7 @@ export const brandResearch: JobTypeDef<ResearchSpec, ResearchResult> = {
     itemFields: [],
     extraFields: [{ key: "reportMd", label: "Report (Markdown)", type: "textarea" }],
   },
-  run: (_spec, helpers) => runResearch(helpers.brandId, helpers.progress),
+  run: (_spec, helpers) => runResearch(helpers),
   summarize: (result) => {
     const n = result.proposals.length;
     return {

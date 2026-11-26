@@ -274,6 +274,10 @@ export const jobs = pgTable(
     // worker died mid-run (serverless timeout, redeploy) and the job can be claimed again.
     agentLeaseExpiresAt: timestamp("agent_lease_expires_at"),
     agentAttempts: integer("agent_attempts").notNull().default(0),
+    // A job that yielded (waiting on the Brand Builder, say) is not claimed again before this time.
+    agentWaitUntil: timestamp("agent_wait_until"),
+    // What a yielding job needs to resume where it stopped (e.g. the builder run id).
+    agentState: jsonb("agent_state").$type<Record<string, unknown>>(),
     // The founder's own assistant (Claude, Codex over MCP) does the agent work, then submits the result.
     hostRun: boolean("host_run").notNull().default(false),
     createdAt: timestamp("created_at").notNull().defaultNow(),

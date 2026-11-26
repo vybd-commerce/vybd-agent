@@ -39,6 +39,11 @@ export type AgentRunHelpers = {
   brandId: string;
   progress: (step: string, note: string) => Promise<void>;
   brief: BriefFields;
+  /** State saved by an earlier run of this job that yielded (see JobYield), or null on the first run. */
+  state?: Record<string, unknown> | null;
+  saveState?: (state: Record<string, unknown>) => Promise<void>;
+  /** Epoch ms by which this invocation must hand the job back (serverless limit). Infinity on a long-running worker. */
+  deadlineAt?: number;
 };
 
 export type JobTypeDef<Spec = Record<string, unknown>, Result = Record<string, unknown>> = {
